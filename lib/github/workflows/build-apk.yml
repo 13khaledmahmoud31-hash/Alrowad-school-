@@ -31,6 +31,7 @@ jobs:
             cp -r /tmp/scaffold/android ./android
             sed -i 's/android:label="[^"]*"/android:label="مدرسة الرواد الخاصة"/' android/app/src/main/AndroidManifest.xml
           fi
+          ls -la android/app
 
       - name: Install Dependencies
         run: flutter pub get
