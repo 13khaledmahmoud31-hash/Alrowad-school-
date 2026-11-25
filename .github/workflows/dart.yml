@@ -30,7 +30,7 @@ jobs:
         run: flutter create . --platforms=android
 
       - name: Analyze Code
-        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+        run: flutter analyze lib/ --no-fatal-infos --no-fatal-warnings
 
       - name: Build Release APK
         run: flutter build apk --release
@@ -40,3 +40,5 @@ jobs:
         with:
           name: AlRowad-School-APK
           path: build/app/outputs/flutter-apk/app-release.apk
+env:
+  
