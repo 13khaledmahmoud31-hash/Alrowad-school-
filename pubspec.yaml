@@ -1,7 +1,7 @@
 name: alrowad_private_school
 description: تطبيق مدرسة الرواد الخاصة - نظام تعليمي وإداري متكامل لجميع المراحل.
 publish_to: 'none'
-version: 1.0.0+1
+version: 2.0.0+2
 
 environment:
   sdk: '>=3.5.0 <4.0.0'
@@ -10,6 +10,7 @@ dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.8
+  shared_preferences: ^2.5.3
   excel: ^4.0.6
   file_picker: ^13.4.0
 
