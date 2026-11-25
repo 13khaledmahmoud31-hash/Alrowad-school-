@@ -1,19 +1,23 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:math';
 import 'dart:typed_data';
 import 'package:excel/excel.dart' as xl;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
-void main() {
+const String kSupabaseUrl = 'https://tdpaaqisqlxidhnxnqhe.supabase.co';
+const String kSupabaseKey = 'sb_publishable_n6oQgZCImd1-X4Di-X3CfQ_jCNXc6lk';
+
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await Supabase.initialize(url: kSupabaseUrl, publishableKey: kSupabaseKey);
   runApp(const AlRowadPrivateSchoolApp());
 }
 
 // ============================================================================
-// 1. النماذج والأنواع الأساسية مع دعم الحفظ الدائم (Models + JSON)
+// 1. النماذج والتصنيفات (Cloud Models)
 // ============================================================================
 
 enum UserRole {
@@ -104,56 +108,55 @@ enum NotificationType {
 
 class AppUser {
   final String id;
-  String name, phone, password, classroom, subject, linkedParentPhone, otpCode;
+  String name, phone, email, password, classroom, subject, linkedParentPhone;
   UserRole role;
   GradeLevel grade;
-  bool isVerified;
-  bool isApproved;
+  bool isVerified, isApproved;
 
   AppUser({
     required this.id,
     required this.name,
     required this.phone,
+    required this.email,
     required this.password,
     required this.role,
     this.grade = GradeLevel.p4,
     this.classroom = 'فصل 4/أ',
-    this.subject = 'الرياضيات',
+    this.subject = 'عام',
     this.linkedParentPhone = '',
     this.isVerified = false,
     this.isApproved = true,
-    this.otpCode = '1234',
   });
 
-  Map<String, dynamic> toJson() => {
+  factory AppUser.fromMap(Map<String, dynamic> m) => AppUser(
+        id: m['id'] ?? '',
+        name: m['name'] ?? '',
+        phone: m['phone'] ?? '',
+        email: m['email'] ?? '',
+        password: m['password'] ?? '',
+        role: UserRole.fromName(m['role']),
+        grade: GradeLevel.fromName(m['grade']),
+        classroom: m['classroom'] ?? '',
+        subject: m['subject'] ?? 'عام',
+        linkedParentPhone: m['linked_parent_phone'] ?? '',
+        isVerified: m['is_verified'] == true,
+        isApproved: m['is_approved'] != false,
+      );
+
+  Map<String, dynamic> toMap() => {
         'id': id,
         'name': name,
         'phone': phone,
+        'email': email,
         'password': password,
         'role': role.name,
         'grade': grade.name,
         'classroom': classroom,
         'subject': subject,
-        'linkedParentPhone': linkedParentPhone,
-        'isVerified': isVerified,
-        'isApproved': isApproved,
-        'otpCode': otpCode,
+        'linked_parent_phone': linkedParentPhone,
+        'is_verified': isVerified,
+        'is_approved': isApproved,
       };
-
-  factory AppUser.fromJson(Map<String, dynamic> j) => AppUser(
-        id: j['id'] ?? '',
-        name: j['name'] ?? '',
-        phone: j['phone'] ?? '',
-        password: j['password'] ?? '',
-        role: UserRole.fromName(j['role']),
-        grade: GradeLevel.fromName(j['grade']),
-        classroom: j['classroom'] ?? '',
-        subject: j['subject'] ?? '',
-        linkedParentPhone: j['linkedParentPhone'] ?? '',
-        isVerified: j['isVerified'] ?? false,
-        isApproved: j['isApproved'] ?? true,
-        otpCode: j['otpCode'] ?? '1234',
-      );
 }
 
 class SchoolClass {
@@ -162,9 +165,7 @@ class SchoolClass {
   GradeLevel grade;
   int capacity;
   SchoolClass({required this.id, required this.name, required this.grade, required this.capacity, required this.supervisorName});
-
-  Map<String, dynamic> toJson() => {'id': id, 'name': name, 'grade': grade.name, 'capacity': capacity, 'supervisorName': supervisorName};
-  factory SchoolClass.fromJson(Map<String, dynamic> j) => SchoolClass(id: j['id'], name: j['name'], grade: GradeLevel.fromName(j['grade']), capacity: j['capacity'] ?? 28, supervisorName: j['supervisorName'] ?? '');
+  factory SchoolClass.fromMap(Map<String, dynamic> m) => SchoolClass(id: m['id'], name: m['name'], grade: GradeLevel.fromName(m['grade']), capacity: m['capacity'] ?? 28, supervisorName: m['supervisor_name'] ?? '');
 }
 
 class SubjectItem {
@@ -172,9 +173,7 @@ class SubjectItem {
   String name, teacherName;
   GradeLevel grade;
   SubjectItem({required this.id, required this.name, required this.grade, required this.teacherName});
-
-  Map<String, dynamic> toJson() => {'id': id, 'name': name, 'grade': grade.name, 'teacherName': teacherName};
-  factory SubjectItem.fromJson(Map<String, dynamic> j) => SubjectItem(id: j['id'], name: j['name'], grade: GradeLevel.fromName(j['grade']), teacherName: j['teacherName'] ?? '');
+  factory SubjectItem.fromMap(Map<String, dynamic> m) => SubjectItem(id: m['id'], name: m['name'], grade: GradeLevel.fromName(m['grade']), teacherName: m['teacher_name'] ?? '');
 }
 
 class ScheduleSlot {
@@ -182,18 +181,14 @@ class ScheduleSlot {
   GradeLevel grade;
   int period;
   ScheduleSlot({required this.id, required this.grade, required this.day, required this.period, required this.timeRange, required this.subject, required this.teacherName, required this.classroom});
-
-  Map<String, dynamic> toJson() => {'id': id, 'grade': grade.name, 'day': day, 'period': period, 'timeRange': timeRange, 'subject': subject, 'teacherName': teacherName, 'classroom': classroom};
-  factory ScheduleSlot.fromJson(Map<String, dynamic> j) => ScheduleSlot(id: j['id'], grade: GradeLevel.fromName(j['grade']), day: j['day'], period: j['period'] ?? 1, timeRange: j['timeRange'], subject: j['subject'], teacherName: j['teacherName'], classroom: j['classroom']);
+  factory ScheduleSlot.fromMap(Map<String, dynamic> m) => ScheduleSlot(id: m['id'], grade: GradeLevel.fromName(m['grade']), day: m['day'], period: m['period'] ?? 1, timeRange: m['time_range'], subject: m['subject'], teacherName: m['teacher_name'] ?? '', classroom: m['classroom'] ?? '');
 }
 
 class ExamItem {
   final String id, title, subject, dateStr, timeStr, room;
   GradeLevel grade;
   ExamItem({required this.id, required this.title, required this.subject, required this.grade, required this.dateStr, required this.timeStr, required this.room});
-
-  Map<String, dynamic> toJson() => {'id': id, 'title': title, 'subject': subject, 'grade': grade.name, 'dateStr': dateStr, 'timeStr': timeStr, 'room': room};
-  factory ExamItem.fromJson(Map<String, dynamic> j) => ExamItem(id: j['id'], title: j['title'], subject: j['subject'], grade: GradeLevel.fromName(j['grade']), dateStr: j['dateStr'], timeStr: j['timeStr'], room: j['room']);
+  factory ExamItem.fromMap(Map<String, dynamic> m) => ExamItem(id: m['id'], title: m['title'], subject: m['subject'], grade: GradeLevel.fromName(m['grade']), dateStr: m['date_str'], timeStr: m['time_str'], room: m['room'] ?? '');
 }
 
 class AttendanceEntry {
@@ -201,19 +196,15 @@ class AttendanceEntry {
   GradeLevel grade;
   AttendanceStatus status;
   AttendanceEntry({required this.id, required this.studentId, required this.studentName, required this.grade, required this.dateStr, required this.status});
-
-  Map<String, dynamic> toJson() => {'id': id, 'studentId': studentId, 'studentName': studentName, 'grade': grade.name, 'dateStr': dateStr, 'status': status.name};
-  factory AttendanceEntry.fromJson(Map<String, dynamic> j) => AttendanceEntry(id: j['id'], studentId: j['studentId'], studentName: j['studentName'], grade: GradeLevel.fromName(j['grade']), dateStr: j['dateStr'], status: AttendanceStatus.fromName(j['status']));
+  factory AttendanceEntry.fromMap(Map<String, dynamic> m) => AttendanceEntry(id: m['id'], studentId: m['student_id'], studentName: m['student_name'], grade: GradeLevel.fromName(m['grade']), dateStr: m['date_str'], status: AttendanceStatus.fromName(m['status']));
 }
 
 class HomeworkItem {
   final String id, subject, title, details, dueDate, teacherName;
   GradeLevel grade;
-  final Set<String> completedStudentIds;
-  HomeworkItem({required this.id, required this.grade, required this.subject, required this.title, required this.details, required this.dueDate, required this.teacherName, Set<String>? completedStudentIds}) : completedStudentIds = completedStudentIds ?? {};
-
-  Map<String, dynamic> toJson() => {'id': id, 'grade': grade.name, 'subject': subject, 'title': title, 'details': details, 'dueDate': dueDate, 'teacherName': teacherName, 'completedStudentIds': completedStudentIds.toList()};
-  factory HomeworkItem.fromJson(Map<String, dynamic> j) => HomeworkItem(id: j['id'], grade: GradeLevel.fromName(j['grade']), subject: j['subject'], title: j['title'], details: j['details'], dueDate: j['dueDate'], teacherName: j['teacherName'], completedStudentIds: Set<String>.from(j['completedStudentIds'] ?? []));
+  final Set<String> completedIds;
+  HomeworkItem({required this.id, required this.grade, required this.subject, required this.title, required this.details, required this.dueDate, required this.teacherName, Set<String>? completedIds}) : completedIds = completedIds ?? {};
+  factory HomeworkItem.fromMap(Map<String, dynamic> m) => HomeworkItem(id: m['id'], grade: GradeLevel.fromName(m['grade']), subject: m['subject'], title: m['title'], details: m['details'] ?? '', dueDate: m['due_date'], teacherName: m['teacher_name'] ?? '', completedIds: Set<String>.from(m['completed_ids'] ?? []));
 }
 
 class GradeEntry {
@@ -221,9 +212,7 @@ class GradeEntry {
   GradeLevel grade;
   double score, maxScore;
   GradeEntry({required this.id, required this.studentId, required this.studentName, required this.grade, required this.subject, required this.examTitle, required this.score, required this.maxScore, required this.note});
-
-  Map<String, dynamic> toJson() => {'id': id, 'studentId': studentId, 'studentName': studentName, 'grade': grade.name, 'subject': subject, 'examTitle': examTitle, 'score': score, 'maxScore': maxScore, 'note': note};
-  factory GradeEntry.fromJson(Map<String, dynamic> j) => GradeEntry(id: j['id'], studentId: j['studentId'], studentName: j['studentName'], grade: GradeLevel.fromName(j['grade']), subject: j['subject'], examTitle: j['examTitle'], score: (j['score'] as num).toDouble(), maxScore: (j['maxScore'] as num).toDouble(), note: j['note'] ?? '');
+  factory GradeEntry.fromMap(Map<String, dynamic> m) => GradeEntry(id: m['id'], studentId: m['student_id'], studentName: m['student_name'], grade: GradeLevel.fromName(m['grade']), subject: m['subject'], examTitle: m['exam_title'], score: (m['score'] as num).toDouble(), maxScore: (m['max_score'] as num).toDouble(), note: m['note'] ?? '');
 }
 
 class FeeInvoice {
@@ -233,9 +222,7 @@ class FeeInvoice {
   FeeInvoice({required this.id, required this.studentId, required this.studentName, required this.grade, required this.title, required this.totalAmount, required this.paidAmount, required this.dueDate});
   double get remaining => (totalAmount - paidAmount).clamp(0, totalAmount);
   bool get isFullyPaid => remaining <= 0;
-
-  Map<String, dynamic> toJson() => {'id': id, 'studentId': studentId, 'studentName': studentName, 'grade': grade.name, 'title': title, 'totalAmount': totalAmount, 'paidAmount': paidAmount, 'dueDate': dueDate};
-  factory FeeInvoice.fromJson(Map<String, dynamic> j) => FeeInvoice(id: j['id'], studentId: j['studentId'], studentName: j['studentName'], grade: GradeLevel.fromName(j['grade']), title: j['title'], totalAmount: (j['totalAmount'] as num).toDouble(), paidAmount: (j['paidAmount'] as num).toDouble(), dueDate: j['dueDate']);
+  factory FeeInvoice.fromMap(Map<String, dynamic> m) => FeeInvoice(id: m['id'], studentId: m['student_id'], studentName: m['student_name'], grade: GradeLevel.fromName(m['grade']), title: m['title'], totalAmount: (m['total_amount'] as num).toDouble(), paidAmount: (m['paid_amount'] as num).toDouble(), dueDate: m['due_date']);
 }
 
 class AnnouncementNews {
@@ -243,9 +230,7 @@ class AnnouncementNews {
   UserRole? targetRole;
   bool isUrgent;
   AnnouncementNews({required this.id, required this.title, required this.body, required this.category, this.targetRole, required this.author, required this.dateLabel, this.isUrgent = false});
-
-  Map<String, dynamic> toJson() => {'id': id, 'title': title, 'body': body, 'category': category, 'targetRole': targetRole?.name, 'author': author, 'dateLabel': dateLabel, 'isUrgent': isUrgent};
-  factory AnnouncementNews.fromJson(Map<String, dynamic> j) => AnnouncementNews(id: j['id'], title: j['title'], body: j['body'], category: j['category'], targetRole: j['targetRole'] == null ? null : UserRole.fromName(j['targetRole']), author: j['author'], dateLabel: j['dateLabel'], isUrgent: j['isUrgent'] ?? false);
+  factory AnnouncementNews.fromMap(Map<String, dynamic> m) => AnnouncementNews(id: m['id'], title: m['title'], body: m['body'], category: m['category'] ?? 'إعلان', targetRole: m['target_role'] == null ? null : UserRole.fromName(m['target_role']), author: m['author'] ?? 'الإدارة', dateLabel: m['date_label'] ?? 'اليوم', isUrgent: m['is_urgent'] == true);
 }
 
 class SchoolNotification {
@@ -253,46 +238,45 @@ class SchoolNotification {
   final NotificationType type;
   String? targetPhone;
   UserRole? targetRole;
-  bool isRead;
-  SchoolNotification({required this.id, required this.type, required this.title, required this.body, this.targetPhone, this.targetRole, required this.dateLabel, this.isRead = false});
-
-  Map<String, dynamic> toJson() => {'id': id, 'type': type.name, 'title': title, 'body': body, 'targetPhone': targetPhone, 'targetRole': targetRole?.name, 'dateLabel': dateLabel, 'isRead': isRead};
-  factory SchoolNotification.fromJson(Map<String, dynamic> j) => SchoolNotification(id: j['id'], type: NotificationType.fromName(j['type']), title: j['title'], body: j['body'], targetPhone: j['targetPhone'], targetRole: j['targetRole'] == null ? null : UserRole.fromName(j['targetRole']), dateLabel: j['dateLabel'], isRead: j['isRead'] ?? false);
+  final Set<String> readBy;
+  SchoolNotification({required this.id, required this.type, required this.title, required this.body, this.targetPhone, this.targetRole, required this.dateLabel, Set<String>? readBy}) : readBy = readBy ?? {};
+  factory SchoolNotification.fromMap(Map<String, dynamic> m) => SchoolNotification(id: m['id'], type: NotificationType.fromName(m['type']), title: m['title'], body: m['body'], targetPhone: m['target_phone'], targetRole: m['target_role'] == null ? null : UserRole.fromName(m['target_role']), dateLabel: m['date_label'] ?? 'الآن', readBy: Set<String>.from(m['read_by'] ?? []));
 }
 
 class EducationalFile {
   final String id, title, fileType, subject, urlOrName, uploadedBy, dateLabel;
   GradeLevel grade;
   EducationalFile({required this.id, required this.title, required this.fileType, required this.grade, required this.subject, required this.urlOrName, required this.uploadedBy, required this.dateLabel});
-
-  Map<String, dynamic> toJson() => {'id': id, 'title': title, 'fileType': fileType, 'grade': grade.name, 'subject': subject, 'urlOrName': urlOrName, 'uploadedBy': uploadedBy, 'dateLabel': dateLabel};
-  factory EducationalFile.fromJson(Map<String, dynamic> j) => EducationalFile(id: j['id'], title: j['title'], fileType: j['fileType'], grade: GradeLevel.fromName(j['grade']), subject: j['subject'], urlOrName: j['urlOrName'], uploadedBy: j['uploadedBy'], dateLabel: j['dateLabel']);
+  factory EducationalFile.fromMap(Map<String, dynamic> m) => EducationalFile(id: m['id'], title: m['title'], fileType: m['file_type'], grade: GradeLevel.fromName(m['grade']), subject: m['subject'], urlOrName: m['url_or_name'], uploadedBy: m['uploaded_by'] ?? '', dateLabel: m['date_label'] ?? 'اليوم');
 }
 
 class SchoolMessage {
   final String id, senderName, senderPhone, recipientLabel, subject, body, dateLabel;
   String reply;
   SchoolMessage({required this.id, required this.senderName, required this.senderPhone, required this.recipientLabel, required this.subject, required this.body, this.reply = '', required this.dateLabel});
-
-  Map<String, dynamic> toJson() => {'id': id, 'senderName': senderName, 'senderPhone': senderPhone, 'recipientLabel': recipientLabel, 'subject': subject, 'body': body, 'reply': reply, 'dateLabel': dateLabel};
-  factory SchoolMessage.fromJson(Map<String, dynamic> j) => SchoolMessage(id: j['id'], senderName: j['senderName'], senderPhone: j['senderPhone'], recipientLabel: j['recipientLabel'], subject: j['subject'], body: j['body'], reply: j['reply'] ?? '', dateLabel: j['dateLabel']);
+  factory SchoolMessage.fromMap(Map<String, dynamic> m) => SchoolMessage(id: m['id'], senderName: m['sender_name'], senderPhone: m['sender_phone'], recipientLabel: m['recipient_label'], subject: m['subject'], body: m['body'], reply: m['reply'] ?? '', dateLabel: m['date_label'] ?? 'الآن');
 }
 
 // ============================================================================
-// 2. إدارة الحالة والحفظ الدائم على الجهاز (SchoolState + SharedPreferencesAsync)
+// 2. إدارة الحالة السحابية (Supabase Cloud State + Real Verification)
 // ============================================================================
 
 class SchoolState extends ChangeNotifier {
-  static const String _storageKey = 'alrowad_school_db_v2';
-  final SharedPreferencesAsync _prefs = SharedPreferencesAsync();
-  final Random _rng = Random();
+  final _sb = Supabase.instance.client;
+  final _prefs = SharedPreferencesAsync();
+  static const _sessionKey = 'alrowad_session_uid';
+  static const _themeKey = 'alrowad_dark_mode';
 
   bool _isInitialized = false;
+  bool _isSyncing = false;
+  String? _syncError;
   ThemeMode _themeMode = ThemeMode.light;
   String? _currentUserId;
   String _selectedParentChildId = '';
 
   bool get isInitialized => _isInitialized;
+  bool get isSyncing => _isSyncing;
+  String? get syncError => _syncError;
   ThemeMode get themeMode => _themeMode;
   static const List<String> weekDays = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس'];
 
@@ -318,233 +302,223 @@ class SchoolState extends ChangeNotifier {
 
   Future<void> init() async {
     try {
-      final raw = await _prefs.getString(_storageKey);
-      if (raw != null && raw.isNotEmpty) {
-        final map = jsonDecode(raw) as Map<String, dynamic>;
-        _themeMode = (map['darkMode'] == true) ? ThemeMode.dark : ThemeMode.light;
-        _currentUserId = map['currentUserId'];
-        _selectedParentChildId = map['selectedParentChildId'] ?? '';
-        _users = (map['users'] as List).map((e) => AppUser.fromJson(e)).toList();
-        _classes = (map['classes'] as List).map((e) => SchoolClass.fromJson(e)).toList();
-        _subjects = (map['subjects'] as List).map((e) => SubjectItem.fromJson(e)).toList();
-        _schedule = (map['schedule'] as List).map((e) => ScheduleSlot.fromJson(e)).toList();
-        _exams = (map['exams'] as List).map((e) => ExamItem.fromJson(e)).toList();
-        _attendance = (map['attendance'] as List).map((e) => AttendanceEntry.fromJson(e)).toList();
-        _homeworks = (map['homeworks'] as List).map((e) => HomeworkItem.fromJson(e)).toList();
-        _grades = (map['grades'] as List).map((e) => GradeEntry.fromJson(e)).toList();
-        _invoices = (map['invoices'] as List).map((e) => FeeInvoice.fromJson(e)).toList();
-        _announcements = (map['announcements'] as List).map((e) => AnnouncementNews.fromJson(e)).toList();
-        _notifications = (map['notifications'] as List).map((e) => SchoolNotification.fromJson(e)).toList();
-        _files = (map['files'] as List).map((e) => EducationalFile.fromJson(e)).toList();
-        _messages = (map['messages'] as List).map((e) => SchoolMessage.fromJson(e)).toList();
-      } else {
-        _seedInitialData();
-        await _persist();
-      }
-    } catch (_) {
-      _seedInitialData();
+      _themeMode = (await _prefs.getBool(_themeKey) ?? false) ? ThemeMode.dark : ThemeMode.light;
+      _currentUserId = await _prefs.getString(_sessionKey);
+      await refreshAll();
+    } catch (e) {
+      _syncError = 'تعذر الاتصال بالسحابة: تأكد من الإنترنت';
     }
     _isInitialized = true;
     notifyListeners();
   }
 
-  void _seedInitialData() {
-    _users = [
-      AppUser(id: 'u_admin', name: 'أ. خالد محمود (مدير المدرسة)', phone: '01129220696', password: 'khaled123', role: UserRole.admin, isVerified: true, isApproved: true, otpCode: '0000'),
-    ];
-    _classes = [
-      SchoolClass(id: 'c1', name: 'قاعة النجوم - KG2', grade: GradeLevel.kg2, capacity: 22, supervisorName: 'أ. سارة مجدي'),
-      SchoolClass(id: 'c2', name: 'فصل 4/أ', grade: GradeLevel.p4, capacity: 28, supervisorName: 'أ. إسلام عبدالعزيز'),
-      SchoolClass(id: 'c3', name: 'فصل 3/أ إعدادي', grade: GradeLevel.prep3, capacity: 30, supervisorName: 'أ. خالد نصار'),
-    ];
-    _subjects = [
-      SubjectItem(id: 'sb1', name: 'الرياضيات', grade: GradeLevel.p4, teacherName: 'هيئة التدريس'),
-      SubjectItem(id: 'sb2', name: 'اللغة العربية', grade: GradeLevel.p4, teacherName: 'هيئة التدريس'),
-      SubjectItem(id: 'sb3', name: 'العلوم', grade: GradeLevel.p4, teacherName: 'هيئة التدريس'),
-    ];
-    _schedule = [
-      ScheduleSlot(id: 'sc1', grade: GradeLevel.p4, day: 'الأحد', period: 1, timeRange: '08:00 - 08:45', subject: 'اللغة العربية', teacherName: 'هيئة التدريس', classroom: 'فصل 4/أ'),
-      ScheduleSlot(id: 'sc2', grade: GradeLevel.p4, day: 'الأحد', period: 2, timeRange: '08:50 - 09:35', subject: 'الرياضيات', teacherName: 'هيئة التدريس', classroom: 'فصل 4/أ'),
-    ];
-    _exams = [
-      ExamItem(id: 'ex1', title: 'اختبار شهر نوفمبر', subject: 'الرياضيات', grade: GradeLevel.p4, dateStr: 'الأحد 30 نوفمبر', timeStr: '09:00 ص', room: 'لجنة 4/أ'),
-    ];
-    _announcements = [
-      AnnouncementNews(id: 'an1', title: 'أهلاً بكم في منصة مدرسة الرواد الخاصة', body: 'نظام الإدارة والمتابعة الإلكترونية لجميع المراحل الدراسية من KG1 وحتى الثالث الإعدادي.', category: 'إعلان', author: 'إدارة المدرسة', dateLabel: 'اليوم', isUrgent: true),
-    ];
-    _notifications = [
-      SchoolNotification(id: 'n1', type: NotificationType.announcement, title: 'مرحباً بكم في النظام الجديد', body: 'تم تفعيل الحفظ التلقائي وتوثيق الحسابات برمز التحقق.', dateLabel: 'الآن'),
-    ];
+  Future<void> refreshAll() async {
+    _isSyncing = true;
+    _syncError = null;
+    notifyListeners();
+    try {
+      final res = await Future.wait([
+        _sb.from('school_users').select().order('created_at', ascending: false),
+        _sb.from('school_classes').select(),
+        _sb.from('school_subjects').select(),
+        _sb.from('school_schedule').select(),
+        _sb.from('school_exams').select(),
+        _sb.from('school_attendance').select(),
+        _sb.from('school_homeworks').select(),
+        _sb.from('school_grades').select(),
+        _sb.from('school_invoices').select(),
+        _sb.from('school_announcements').select(),
+        _sb.from('school_notifications').select(),
+        _sb.from('school_files').select(),
+        _sb.from('school_messages').select(),
+      ]);
+      _users = (res[0] as List).map((e) => AppUser.fromMap(e)).toList();
+      _classes = (res[1] as List).map((e) => SchoolClass.fromMap(e)).toList();
+      _subjects = (res[2] as List).map((e) => SubjectItem.fromMap(e)).toList();
+      _schedule = (res[3] as List).map((e) => ScheduleSlot.fromMap(e)).toList();
+      _exams = (res[4] as List).map((e) => ExamItem.fromMap(e)).toList();
+      _attendance = (res[5] as List).map((e) => AttendanceEntry.fromMap(e)).toList();
+      _homeworks = (res[6] as List).map((e) => HomeworkItem.fromMap(e)).toList();
+      _grades = (res[7] as List).map((e) => GradeEntry.fromMap(e)).toList();
+      _invoices = (res[8] as List).map((e) => FeeInvoice.fromMap(e)).toList();
+      _announcements = (res[9] as List).map((e) => AnnouncementNews.fromMap(e)).toList();
+      _notifications = (res[10] as List).map((e) => SchoolNotification.fromMap(e)).toList();
+      _files = (res[11] as List).map((e) => EducationalFile.fromMap(e)).toList();
+      _messages = (res[12] as List).map((e) => SchoolMessage.fromMap(e)).toList();
+      if (currentUser?.role == UserRole.parent) {
+        final kids = childrenOfParent(currentUser!.phone);
+        if (kids.isNotEmpty && _selectedParentChildId.isEmpty) _selectedParentChildId = kids.first.id;
+      }
+    } catch (e) {
+      _syncError = 'فشل التحديث السحابي، تحقق من الاتصال بالإنترنت';
+    }
+    _isSyncing = false;
+    notifyListeners();
   }
 
-  Future<void> _persist() async {
-    final payload = jsonEncode({
-      'darkMode': _themeMode == ThemeMode.dark,
-      'currentUserId': _currentUserId,
-      'selectedParentChildId': _selectedParentChildId,
-      'users': _users.map((e) => e.toJson()).toList(),
-      'classes': _classes.map((e) => e.toJson()).toList(),
-      'subjects': _subjects.map((e) => e.toJson()).toList(),
-      'schedule': _schedule.map((e) => e.toJson()).toList(),
-      'exams': _exams.map((e) => e.toJson()).toList(),
-      'attendance': _attendance.map((e) => e.toJson()).toList(),
-      'homeworks': _homeworks.map((e) => e.toJson()).toList(),
-      'grades': _grades.map((e) => e.toJson()).toList(),
-      'invoices': _invoices.map((e) => e.toJson()).toList(),
-      'announcements': _announcements.map((e) => e.toJson()).toList(),
-      'notifications': _notifications.map((e) => e.toJson()).toList(),
-      'files': _files.map((e) => e.toJson()).toList(),
-      'messages': _messages.map((e) => e.toJson()).toList(),
-    });
-    await _prefs.setString(_storageKey, payload);
-  }
-
-  String _generateOtp() => (1000 + _rng.nextInt(9000)).toString();
-
-  void toggleTheme() {
+  Future<void> toggleTheme() async {
     _themeMode = _themeMode == ThemeMode.light ? ThemeMode.dark : ThemeMode.light;
-    _persist();
+    await _prefs.setBool(_themeKey, _themeMode == ThemeMode.dark);
     notifyListeners();
   }
 
-  // تسجيل الدخول والمصادقة وتأكيد الحساب
-  String? login(String phone, String password, {bool rememberSession = true}) {
-    final p = phone.trim(), pass = password.trim();
-    if (p.isEmpty || pass.isEmpty) return 'يرجى إدخال رقم الهاتف وكلمة المرور';
-    final match = _users.where((u) => u.phone == p && u.password == pass).toList();
-    if (match.isEmpty) return 'بيانات الدخول غير صحيحة. تأكد من رقم الهاتف وكلمة المرور.';
-    final user = match.first;
-    if (!user.isVerified) {
-      user.otpCode = _generateOtp();
+  // المصادقة السحابية وتأكيد ملكية البريد (Anti-Hijack)
+  Future<String?> login(String identifier, String password, {bool remember = true}) async {
+    final idOrPhone = identifier.trim(), pass = password.trim();
+    if (idOrPhone.isEmpty || pass.isEmpty) return 'يرجى إدخال رقم الهاتف (أو البريد) وكلمة المرور';
+    try {
+      final rows = await _sb.from('school_users').select().or('phone.eq.$idOrPhone,email.eq.$idOrPhone');
+      if (rows.isEmpty) return 'لا يوجد حساب مسجل بهذه البيانات';
+      final user = AppUser.fromMap(rows.first);
+      if (user.password != pass) return 'كلمة المرور غير صحيحة';
+
+      // إذا كان الحساب غير مؤكد على السيرفر، نرسل رابط التأكيد لبريده الحقيقي
+      if (!user.isVerified && user.email.contains('@') && !user.email.endsWith('.local')) {
+        await _sendVerificationEmail(user);
+      }
+
+      _currentUserId = user.id;
+      if (remember) await _prefs.setString(_sessionKey, user.id);
+      await refreshAll();
+      return null;
+    } catch (e) {
+      return 'حدث خطأ أثناء الاتصال بالسيرفر، تأكد من الإنترنت';
     }
-    _currentUserId = user.id;
-    if (user.role == UserRole.parent) {
-      final kids = childrenOfParent(user.phone);
-      if (kids.isNotEmpty) _selectedParentChildId = kids.first.id;
-    }
-    if (rememberSession) _persist();
-    notifyListeners();
-    return null;
   }
 
-  ({String? error, AppUser? created}) registerSelf({
+  Future<void> _sendVerificationEmail(AppUser user) async {
+    try {
+      await _sb.auth.signUp(email: user.email, password: user.password);
+    } catch (_) {
+      try {
+        await _sb.auth.resend(type: OtpType.signup, email: user.email);
+      } catch (_) {}
+    }
+  }
+
+  Future<String?> registerSelf({
     required String name,
     required String phone,
+    required String email,
     required String password,
     required UserRole role,
     required GradeLevel grade,
     String linkedParentPhone = '',
-  }) {
-    final p = phone.trim();
-    if (name.trim().isEmpty || p.length < 8 || password.trim().length < 6) {
-      return (error: 'تأكد من الاسم ورقم الهاتف الصحيح وكلمة مرور لا تقل عن 6 أحرف', created: null);
+  }) async {
+    final p = phone.trim(), em = email.trim().toLowerCase(), pass = password.trim();
+    if (name.trim().isEmpty || p.length < 8 || !em.contains('@') || pass.length < 6) {
+      return 'تأكد من الاسم ورقم الهاتف والبريد الإلكتروني الصحيح وكلمة مرور 6 أحرف فأكثر';
     }
-    if (_users.any((u) => u.phone == p)) {
-      return (error: 'رقم الهاتف مسجل بالفعل في النظام', created: null);
+    try {
+      final existing = await _sb.from('school_users').select().or('phone.eq.$p,email.eq.$em');
+      if (existing.isNotEmpty) return 'رقم الهاتف أو البريد الإلكتروني مسجل مسبقاً';
+
+      // إرسال رسالة التأكيد الحقيقية من Supabase Auth لبريد المستخدم
+      await _sb.auth.signUp(email: em, password: pass);
+
+      final user = AppUser(
+        id: 'u_${DateTime.now().microsecondsSinceEpoch}',
+        name: name.trim(),
+        phone: p,
+        email: em,
+        password: pass,
+        role: role,
+        grade: grade,
+        classroom: 'فصل ${grade.shortLabel}',
+        linkedParentPhone: linkedParentPhone.trim(),
+        isVerified: false,
+        isApproved: false,
+      );
+      await _sb.from('school_users').insert(user.toMap());
+      _currentUserId = user.id;
+      await _prefs.setString(_sessionKey, user.id);
+      await refreshAll();
+      return null;
+    } on AuthException catch (e) {
+      return 'تنبيه من نظام التحقق: ${e.message}';
+    } catch (_) {
+      return 'تعذر إنشاء الحساب، تأكد من اتصال الإنترنت';
     }
-    final user = AppUser(
-      id: 'u_${DateTime.now().microsecondsSinceEpoch}',
-      name: name.trim(),
-      phone: p,
-      password: password.trim(),
-      role: role,
-      grade: grade,
-      classroom: 'فصل ${grade.shortLabel}',
-      linkedParentPhone: linkedParentPhone.trim(),
-      isVerified: false,
-      isApproved: false, // حسابات التسجيل الذاتي تنتظر موافقة المدير بعد تأكيد OTP
-      otpCode: _generateOtp(),
-    );
-    _users.add(user);
-    _currentUserId = user.id;
-    _persist();
-    notifyListeners();
-    return (error: null, created: user);
   }
 
-  String resendOtpForCurrent() {
+  Future<String?> resendVerificationForCurrent() async {
     final u = currentUser;
-    if (u == null) return '';
-    u.otpCode = _generateOtp();
-    _persist();
-    notifyListeners();
-    return u.otpCode;
-  }
-
-  String? verifyCurrentUserOtp(String code, {String? newPassword}) {
-    final u = currentUser;
-    if (u == null) return 'لا توجد جلسة نشطة';
-    if (code.trim() != u.otpCode) return 'رمز التحقق غير صحيح، يرجى التأكد والمحاولة مرة أخرى';
-    u.isVerified = true;
-    if (newPassword != null && newPassword.trim().length >= 6) {
-      u.password = newPassword.trim();
+    if (u == null) return 'لا توجد جلسة';
+    try {
+      await _sendVerificationEmail(u);
+      return null;
+    } catch (e) {
+      return 'يرجى الانتظار قليلاً قبل إعادة الإرسال';
     }
-    _persist();
-    notifyListeners();
-    return null;
   }
 
-  ({String? error, String? otp}) requestPasswordResetOtp(String phone) {
-    final idx = _users.indexWhere((u) => u.phone == phone.trim());
-    if (idx == -1) return (error: 'لا يوجد حساب مسجل بهذا الرقم', otp: null);
-    final otp = _generateOtp();
-    _users[idx].otpCode = otp;
-    _persist();
-    return (error: null, otp: otp);
+  Future<String?> confirmEmailVerifiedOnServer() async {
+    final u = currentUser;
+    if (u == null) return 'لا توجد جلسة';
+    try {
+      final res = await _sb.auth.signInWithPassword(email: u.email, password: u.password);
+      if (res.user?.emailConfirmedAt == null) {
+        return 'لم يتم الضغط على رابط التأكيد في بريدك بعد!';
+      }
+      await _sb.from('school_users').update({'is_verified': true}).eq('id', u.id);
+      await refreshAll();
+      return null;
+    } on AuthException catch (e) {
+      if (e.message.toLowerCase().contains('not confirmed')) {
+        return 'البريد غير مؤكد بعد! افتح رسالة Gmail واضغط على رابط Confirm your mail أولاً.';
+      }
+      return e.message;
+    } catch (_) {
+      return 'تعذر التحقق من السيرفر، تأكد من الإنترنت';
+    }
   }
 
-  String? completePasswordReset(String phone, String otp, String newPass) {
-    final idx = _users.indexWhere((u) => u.phone == phone.trim());
-    if (idx == -1) return 'الحساب غير موجود';
-    if (_users[idx].otpCode != otp.trim()) return 'رمز التحقق غير صحيح';
-    if (newPass.trim().length < 6) return 'كلمة المرور الجديدة يجب أن تكون 6 أحرف على الأقل';
-    _users[idx].password = newPass.trim();
-    _users[idx].isVerified = true;
-    _persist();
-    notifyListeners();
-    return null;
+  Future<String?> requestPasswordReset(String phoneOrEmail) async {
+    final q = phoneOrEmail.trim();
+    if (q.isEmpty) return 'أدخل رقم الهاتف أو البريد الإلكتروني';
+    try {
+      final rows = await _sb.from('school_users').select().or('phone.eq.$q,email.eq.$q');
+      if (rows.isEmpty) return 'لا يوجد حساب مطابق لهذه البيانات';
+      final user = AppUser.fromMap(rows.first);
+      if (user.email.endsWith('.local') || !user.email.contains('@')) {
+        return 'هذا الحساب لا يملك بريداً حقيقياً، تواصل مع مدير المدرسة لإعادة تعيين كلمة المرور.';
+      }
+      await _sb.auth.resetPasswordForEmail(user.email);
+      return null;
+    } catch (_) {
+      return 'تعذر إرسال رابط الاستعادة، حاول بعد دقيقة';
+    }
   }
 
-  String? changeCurrentUserPassword(String oldPass, String newPass) {
+  Future<String?> changeCurrentUserPassword(String oldPass, String newPass) async {
     final u = currentUser;
     if (u == null) return 'غير مسجل';
     if (u.password != oldPass.trim()) return 'كلمة المرور الحالية غير صحيحة';
-    if (newPass.trim().length < 6) return 'كلمة المرور الجديدة يجب ألا تقل عن 6 أحرف';
-    u.password = newPass.trim();
-    _persist();
-    notifyListeners();
-    return null;
-  }
-
-  void approveUser(String userId) {
-    final i = _users.indexWhere((u) => u.id == userId);
-    if (i != -1) {
-      _users[i].isApproved = true;
-      _pushNotif(NotificationType.announcement, 'تم اعتماد حسابك', 'أهلاً ${_users[i].name}، تم اعتماد وتفعيل حسابك من إدارة مدرسة الرواد.', targetPhone: _users[i].phone);
-      _persist();
-      notifyListeners();
+    if (newPass.trim().length < 6) return 'كلمة المرور الجديدة يجب أن تكون 6 أحرف على الأقل';
+    try {
+      await _sb.from('school_users').update({'password': newPass.trim()}).eq('id', u.id);
+      try {
+        await _sb.auth.updateUser(UserAttributes(password: newPass.trim()));
+      } catch (_) {}
+      await refreshAll();
+      return null;
+    } catch (_) {
+      return 'تعذر تحديث كلمة المرور على السيرفر';
     }
   }
 
-  void verifyUserByAdmin(String userId) {
-    final i = _users.indexWhere((u) => u.id == userId);
-    if (i != -1) {
-      _users[i].isVerified = true;
-      _users[i].isApproved = true;
-      _persist();
-      notifyListeners();
-    }
-  }
-
-  void logout() {
+  Future<void> logout() async {
     _currentUserId = null;
-    _persist();
+    await _prefs.remove(_sessionKey);
+    try {
+      await _sb.auth.signOut();
+    } catch (_) {}
     notifyListeners();
   }
 
-  // الاستعلامات
+  // استعلامات القوائم
   List<AppUser> get allUsers => List.unmodifiable(_users);
-  List<AppUser> usersByRole(UserRole role) => _users.where((u) => u.role == role).toList();
+  List<AppUser> usersByRole(UserRole r) => _users.where((u) => u.role == r).toList();
   List<AppUser> get pendingUsers => _users.where((u) => !u.isApproved || !u.isVerified).toList();
   List<SchoolClass> get allClasses => List.unmodifiable(_classes);
   List<SubjectItem> get allSubjects => List.unmodifiable(_subjects);
@@ -559,7 +533,7 @@ class SchoolState extends ChangeNotifier {
   List<SchoolMessage> get allMessages => List.unmodifiable(_messages);
 
   List<AppUser> childrenOfParent(String parentPhone) =>
-      _users.where((u) => u.role == UserRole.student && u.linkedParentPhone == parentPhone).toList();
+      _users.where((u) => u.role == UserRole.student && u.linked_parent_phone_match(parentPhone)).toList();
 
   AppUser? get selectedParentChild {
     final u = currentUser;
@@ -569,9 +543,8 @@ class SchoolState extends ChangeNotifier {
     return kids.firstWhere((k) => k.id == _selectedParentChildId, orElse: () => kids.first);
   }
 
-  void selectParentChild(String studentId) {
-    _selectedParentChildId = studentId;
-    _persist();
+  void selectParentChild(String id) {
+    _selectedParentChildId = id;
     notifyListeners();
   }
 
@@ -585,58 +558,77 @@ class SchoolState extends ChangeNotifier {
     }).toList();
   }
 
-  int get unreadNotificationsCount => notificationsForCurrentUser().where((n) => !n.isRead).length;
+  int get unreadNotificationsCount {
+    final uid = currentUser?.id;
+    if (uid == null) return 0;
+    return notificationsForCurrentUser().where((n) => !n.readBy.contains(uid)).length;
+  }
 
-  void markNotificationsRead() {
+  Future<void> markNotificationsRead() async {
+    final uid = currentUser?.id;
+    if (uid == null) return;
     for (final n in notificationsForCurrentUser()) {
-      n.isRead = true;
+      if (!n.readBy.contains(uid)) {
+        n.readBy.add(uid);
+        await _sb.from('school_notifications').update({'read_by': n.readBy.toList()}).eq('id', n.id);
+      }
     }
-    _persist();
     notifyListeners();
   }
 
-  // إضافة وحذف المستخدمين واستيراد Excel
-  String? addUserByAdmin({
+  // عمليات الإدارة السحابية + الإكسيل
+  Future<String?> addUserByAdmin({
     required String name,
     required String phone,
+    required String email,
     required String password,
     required UserRole role,
     GradeLevel grade = GradeLevel.p4,
-    String classroom = '',
-    String subject = 'الرياضيات',
+    String subject = 'عام',
     String linkedParentPhone = '',
-  }) {
-    final cleanPhone = phone.trim();
-    if (name.trim().isEmpty || cleanPhone.isEmpty || password.trim().isEmpty) return 'يرجى استكمال الاسم والهاتف وكلمة المرور';
-    if (_users.any((u) => u.phone == cleanPhone)) return 'رقم الهاتف مسجل بالفعل';
-    final user = AppUser(
-      id: 'u_${DateTime.now().microsecondsSinceEpoch}',
-      name: name.trim(),
-      phone: cleanPhone,
-      password: password.trim(),
-      role: role,
-      grade: grade,
-      classroom: classroom.trim().isEmpty ? 'فصل ${grade.shortLabel}' : classroom.trim(),
-      subject: subject.trim().isEmpty ? 'عام' : subject.trim(),
-      linkedParentPhone: linkedParentPhone.trim(),
-      isVerified: false, // يُطلب من المستخدم تأكيد حسابه برمز OTP في أول دخول
-      isApproved: true,
-      otpCode: _generateOtp(),
-    );
-    _users.add(user);
-    if (role == UserRole.student) {
-      _attendance.add(AttendanceEntry(id: 'att_${DateTime.now().microsecondsSinceEpoch}', studentId: user.id, studentName: user.name, grade: user.grade, dateStr: '2026-11-25', status: AttendanceStatus.present));
+  }) async {
+    final p = phone.trim(), em = email.trim().toLowerCase(), pass = password.trim();
+    if (name.trim().isEmpty || p.isEmpty || !em.contains('@') || pass.length < 6) {
+      return 'تأكد من الاسم ورقم الهاتف والبريد الإلكتروني وكلمة المرور (6 أحرف+)';
     }
-    _persist();
-    notifyListeners();
-    return null;
+    if (_users.any((u) => u.phone == p || u.email == em)) return 'رقم الهاتف أو البريد مسجل بالفعل';
+    try {
+      final user = AppUser(
+        id: 'u_${DateTime.now().microsecondsSinceEpoch}',
+        name: name.trim(),
+        phone: p,
+        email: em,
+        password: pass,
+        role: role,
+        grade: grade,
+        classroom: 'فصل ${grade.shortLabel}',
+        subject: subject.trim().isEmpty ? 'عام' : subject.trim(),
+        linkedParentPhone: linkedParentPhone.trim(),
+        isVerified: false, // يؤكد المستخدم بريده في أول تسجيل دخول
+        isApproved: true,
+      );
+      await _sb.from('school_users').insert(user.toMap());
+      await refreshAll();
+      return null;
+    } catch (_) {
+      return 'فشل الحفظ على السيرفر';
+    }
   }
 
-  void deleteUser(String id) {
+  Future<void> approveAndVerifyUser(String userId) async {
+    await _sb.from('school_users').update({'is_verified': true, 'is_approved': true}).eq('id', userId);
+    await refreshAll();
+  }
+
+  Future<void> resetUserPasswordByAdmin(String userId, String newPass) async {
+    await _sb.from('school_users').update({'password': newPass.trim()}).eq('id', userId);
+    await refreshAll();
+  }
+
+  Future<void> deleteUser(String id) async {
     if (_currentUserId == id) return;
-    _users.removeWhere((u) => u.id == id);
-    _persist();
-    notifyListeners();
+    await _sb.from('school_users').delete().eq('id', id);
+    await refreshAll();
   }
 
   String _cellText(xl.CellValue? val) {
@@ -647,8 +639,6 @@ class SchoolState extends ChangeNotifier {
       final d = val.value;
       return d == d.roundToDouble() ? d.toInt().toString() : d.toString();
     }
-    if (val is xl.BoolCellValue) return val.value.toString();
-    if (val is xl.FormulaCellValue) return val.formula;
     return val.toString();
   }
 
@@ -660,30 +650,33 @@ class SchoolState extends ChangeNotifier {
     return UserRole.student;
   }
 
-  ({int added, int skipped}) importRows(List<List<String>> rows) {
+  // الأعمدة: الاسم | الصفة | الهاتف | البريد | كلمة المرور | الصف | هاتف ولي الأمر أو المادة
+  Future<({int added, int skipped, String message})> importRows(List<List<String>> rows) async {
     int added = 0, skipped = 0;
     for (int i = 0; i < rows.length; i++) {
       final c = rows[i].map((e) => e.trim()).toList();
-      if (c.length < 4) continue;
-      if (i == 0 && (c[0].contains('الاسم') || c[2].contains('الهاتف') || c[2].toLowerCase().contains('phone'))) continue;
-      if (c[0].isEmpty || c[2].isEmpty || c[3].isEmpty) {
-        skipped++;
-        continue;
-      }
-      final role = _parseRole(c[1]);
-      final grade = c.length > 4 && c[4].isNotEmpty ? GradeLevel.parseGrade(c[4]) : GradeLevel.p4;
-      final extra = c.length > 5 ? c[5] : '';
-      final err = addUserByAdmin(name: c[0], phone: c[2], password: c[3], role: role, grade: grade, subject: role == UserRole.teacher && extra.isNotEmpty ? extra : 'عام', linkedParentPhone: role == UserRole.student ? extra : '');
+      if (c.length < 5) continue;
+      if (i == 0 && (c[0].contains('الاسم') || c[2].contains('الهاتف'))) continue;
+      final err = await addUserByAdmin(
+        name: c[0],
+        role: _parseRole(c[1]),
+        phone: c[2],
+        email: c[3],
+        password: c[4],
+        grade: c.length > 5 && c[5].isNotEmpty ? GradeLevel.parseGrade(c[5]) : GradeLevel.p4,
+        subject: c.length > 6 && c[6].isNotEmpty ? c[6] : 'عام',
+        linkedParentPhone: c.length > 6 ? c[6] : '',
+      );
       if (err == null) {
         added++;
       } else {
         skipped++;
       }
     }
-    return (added: added, skipped: skipped);
+    return (added: added, skipped: skipped, message: 'تمت المعالجة السحابية');
   }
 
-  ({int added, int skipped, String message}) importExcelOrCsvBytes(Uint8List bytes, String fileName) {
+  Future<({int added, int skipped, String message})> importExcelOrCsvBytes(Uint8List bytes, String fileName) async {
     try {
       if (fileName.toLowerCase().endsWith('.csv')) return importDelimitedText(utf8.decode(bytes, allowMalformed: true));
       final wb = xl.Excel.decodeBytes(bytes);
@@ -696,66 +689,57 @@ class SchoolState extends ChangeNotifier {
         }
         break;
       }
-      final res = importRows(rows);
-      return (added: res.added, skipped: res.skipped, message: 'تمت قراءة ملف الإكسيل');
+      return await importRows(rows);
     } catch (_) {
-      return (added: 0, skipped: 0, message: 'تعذر قراءة الملف، تأكد أنه بصيغة .xlsx أو .csv');
+      return (added: 0, skipped: 0, message: 'تعذر قراءة الملف (.xlsx / .csv)');
     }
   }
 
-  ({int added, int skipped, String message}) importDelimitedText(String text) {
+  Future<({int added, int skipped, String message})> importDelimitedText(String text) async {
     final lines = text.split(RegExp(r'\r?\n')).where((l) => l.trim().isNotEmpty).toList();
     final rows = lines.map((l) => l.contains('\t') ? l.split('\t') : (l.contains(';') ? l.split(';') : l.split(','))).toList();
-    final res = importRows(rows);
-    return (added: res.added, skipped: res.skipped, message: 'تمت معالجة البيانات');
+    return await importRows(rows);
   }
 
-  // العمليات الأكاديمية والمالية (تُحفظ فوراً على الجهاز)
-  void addClass(String name, GradeLevel grade, int cap, String sup) {
-    _classes.add(SchoolClass(id: 'c_${DateTime.now().microsecondsSinceEpoch}', name: name, grade: grade, capacity: cap, supervisorName: sup));
-    _persist();
-    notifyListeners();
+  // العمليات السحابية للمدرسة
+  Future<void> addClass(String name, GradeLevel g, int cap, String sup) async {
+    await _sb.from('school_classes').insert({'id': 'c_${DateTime.now().microsecondsSinceEpoch}', 'name': name, 'grade': g.name, 'capacity': cap, 'supervisor_name': sup});
+    await refreshAll();
   }
 
-  void deleteClass(String id) {
-    _classes.removeWhere((c) => c.id == id);
-    _persist();
-    notifyListeners();
+  Future<void> deleteClass(String id) async {
+    await _sb.from('school_classes').delete().eq('id', id);
+    await refreshAll();
   }
 
-  void addSubject(String name, GradeLevel grade, String teacher) {
-    _subjects.add(SubjectItem(id: 'sb_${DateTime.now().microsecondsSinceEpoch}', name: name, grade: grade, teacherName: teacher));
-    _persist();
-    notifyListeners();
+  Future<void> addSubject(String name, GradeLevel g, String teacher) async {
+    await _sb.from('school_subjects').insert({'id': 'sb_${DateTime.now().microsecondsSinceEpoch}', 'name': name, 'grade': g.name, 'teacher_name': teacher});
+    await refreshAll();
   }
 
-  void deleteSubject(String id) {
-    _subjects.removeWhere((s) => s.id == id);
-    _persist();
-    notifyListeners();
+  Future<void> deleteSubject(String id) async {
+    await _sb.from('school_subjects').delete().eq('id', id);
+    await refreshAll();
   }
 
-  void addScheduleSlot(GradeLevel grade, String day, int period, String time, String sub, String teacher, String room) {
-    _schedule.add(ScheduleSlot(id: 'sc_${DateTime.now().microsecondsSinceEpoch}', grade: grade, day: day, period: period, timeRange: time, subject: sub, teacherName: teacher, classroom: room));
-    _persist();
-    notifyListeners();
+  Future<void> addScheduleSlot(GradeLevel g, String day, int period, String time, String sub, String teacher, String room) async {
+    await _sb.from('school_schedule').insert({'id': 'sc_${DateTime.now().microsecondsSinceEpoch}', 'grade': g.name, 'day': day, 'period': period, 'time_range': time, 'subject': sub, 'teacher_name': teacher, 'classroom': room});
+    await refreshAll();
   }
 
-  void deleteScheduleSlot(String id) {
-    _schedule.removeWhere((s) => s.id == id);
-    _persist();
-    notifyListeners();
+  Future<void> deleteScheduleSlot(String id) async {
+    await _sb.from('school_schedule').delete().eq('id', id);
+    await refreshAll();
   }
 
-  void addExam(String title, String sub, GradeLevel grade, String dateStr, String timeStr, String room) {
-    _exams.insert(0, ExamItem(id: 'ex_${DateTime.now().microsecondsSinceEpoch}', title: title, subject: sub, grade: grade, dateStr: dateStr, timeStr: timeStr, room: room));
-    _pushNotif(NotificationType.exam, 'موعد امتحان: $sub', '$title (${grade.shortLabel}) يوم $dateStr الساعة $timeStr');
+  Future<void> addExam(String title, String sub, GradeLevel g, String dateStr, String timeStr, String room) async {
+    await _sb.from('school_exams').insert({'id': 'ex_${DateTime.now().microsecondsSinceEpoch}', 'title': title, 'subject': sub, 'grade': g.name, 'date_str': dateStr, 'time_str': timeStr, 'room': room});
+    await _pushNotif(NotificationType.exam, 'موعد امتحان: $sub', '$title (${g.shortLabel}) يوم $dateStr');
   }
 
-  void deleteExam(String id) {
-    _exams.removeWhere((e) => e.id == id);
-    _persist();
-    notifyListeners();
+  Future<void> deleteExam(String id) async {
+    await _sb.from('school_exams').delete().eq('id', id);
+    await refreshAll();
   }
 
   AttendanceStatus attendanceOf(String studentId) {
@@ -763,97 +747,89 @@ class SchoolState extends ChangeNotifier {
     return m.isEmpty ? AttendanceStatus.present : m.first.status;
   }
 
-  void recordAttendance(AppUser st, AttendanceStatus status) {
-    final i = _attendance.indexWhere((a) => a.studentId == st.id && a.dateStr == '2026-11-25');
-    if (i != -1) {
-      _attendance[i].status = status;
+  Future<void> recordAttendance(AppUser st, AttendanceStatus status) async {
+    final today = DateTime.now().toIso8601String().substring(0, 10);
+    final existing = _attendance.where((a) => a.studentId == st.id && a.dateStr == today).toList();
+    if (existing.isNotEmpty) {
+      await _sb.from('school_attendance').update({'status': status.name}).eq('id', existing.first.id);
     } else {
-      _attendance.insert(0, AttendanceEntry(id: 'att_${DateTime.now().microsecondsSinceEpoch}', studentId: st.id, studentName: st.name, grade: st.grade, dateStr: '2026-11-25', status: status));
+      await _sb.from('school_attendance').insert({'id': 'att_${DateTime.now().microsecondsSinceEpoch}', 'student_id': st.id, 'student_name': st.name, 'grade': st.grade.name, 'date_str': today, 'status': status.name});
     }
     if (status == AttendanceStatus.absent) {
-      _pushNotif(NotificationType.absence, 'إشعار غياب', 'تم تسجيل (${st.name}) غائباً اليوم.', targetPhone: st.linkedParentPhone.isNotEmpty ? st.linkedParentPhone : null, targetRole: UserRole.parent);
+      await _pushNotif(NotificationType.absence, 'تنبيه غياب طالب', 'تم تسجيل (${st.name}) غائباً بتاريخ $today.', targetPhone: st.linkedParentPhone.isNotEmpty ? st.linkedParentPhone : null, targetRole: UserRole.parent);
     } else {
-      _persist();
-      notifyListeners();
+      await refreshAll();
     }
   }
 
-  void addHomework(GradeLevel grade, String sub, String title, String details, String due) {
-    _homeworks.insert(0, HomeworkItem(id: 'hw_${DateTime.now().microsecondsSinceEpoch}', grade: grade, subject: sub, title: title, details: details, dueDate: due, teacherName: currentUser?.name ?? 'المعلم'));
-    _pushNotif(NotificationType.homework, 'واجب جديد: $sub', '$title (${grade.shortLabel}) - التسليم: $due');
+  Future<void> addHomework(GradeLevel g, String sub, String title, String details, String due) async {
+    await _sb.from('school_homeworks').insert({'id': 'hw_${DateTime.now().microsecondsSinceEpoch}', 'grade': g.name, 'subject': sub, 'title': title, 'details': details, 'due_date': due, 'teacher_name': currentUser?.name ?? 'المعلم', 'completed_ids': []});
+    await _pushNotif(NotificationType.homework, 'واجب جديد: $sub', '$title (${g.shortLabel}) - التسليم: $due');
   }
 
-  void toggleHomeworkCompletion(String hwId, String studentId) {
-    final i = _homeworks.indexWhere((h) => h.id == hwId);
-    if (i != -1) {
-      if (_homeworks[i].completedStudentIds.contains(studentId)) {
-        _homeworks[i].completedStudentIds.remove(studentId);
-      } else {
-        _homeworks[i].completedStudentIds.add(studentId);
-      }
-      _persist();
-      notifyListeners();
+  Future<void> toggleHomeworkCompletion(HomeworkItem hw, String studentId) async {
+    final updated = Set<String>.from(hw.completedIds);
+    if (updated.contains(studentId)) {
+      updated.remove(studentId);
+    } else {
+      updated.add(studentId);
     }
+    await _sb.from('school_homeworks').update({'completed_ids': updated.toList()}).eq('id', hw.id);
+    await refreshAll();
   }
 
-  void addGrade(AppUser st, String sub, String exam, double score, double maxScore, String note) {
-    _grades.insert(0, GradeEntry(id: 'gr_${DateTime.now().microsecondsSinceEpoch}', studentId: st.id, studentName: st.name, grade: st.grade, subject: sub, examTitle: exam, score: score, maxScore: maxScore, note: note));
-    _pushNotif(NotificationType.result, 'نتيجة جديدة: $sub', 'حصل ${st.name} على $score / $maxScore في $exam.', targetPhone: st.linkedParentPhone.isNotEmpty ? st.linkedParentPhone : null);
+  Future<void> addGrade(AppUser st, String sub, String exam, double score, double maxScore, String note) async {
+    await _sb.from('school_grades').insert({'id': 'gr_${DateTime.now().microsecondsSinceEpoch}', 'student_id': st.id, 'student_name': st.name, 'grade': st.grade.name, 'subject': sub, 'exam_title': exam, 'score': score, 'max_score': maxScore, 'note': note});
+    await _pushNotif(NotificationType.result, 'نتيجة جديدة: $sub', 'حصل ${st.name} على $score / $maxScore في $exam.', targetPhone: st.linkedParentPhone.isNotEmpty ? st.linkedParentPhone : null);
   }
 
-  void addInvoice(AppUser st, String title, double total, double paid, String due) {
-    _invoices.insert(0, FeeInvoice(id: 'inv_${DateTime.now().microsecondsSinceEpoch}', studentId: st.id, studentName: st.name, grade: st.grade, title: title, totalAmount: total, paidAmount: paid, dueDate: due));
+  Future<void> addInvoice(AppUser st, String title, double total, double paid, String due) async {
+    await _sb.from('school_invoices').insert({'id': 'inv_${DateTime.now().microsecondsSinceEpoch}', 'student_id': st.id, 'student_name': st.name, 'grade': st.grade.name, 'title': title, 'total_amount': total, 'paid_amount': paid, 'due_date': due});
     if (total > paid) {
-      _pushNotif(NotificationType.fees, 'تنبيه مصروفات', 'فاتورة ($title) للطالب ${st.name} متبقي ${(total - paid).toStringAsFixed(0)} ج.م.', targetPhone: st.linkedParentPhone.isNotEmpty ? st.linkedParentPhone : null, targetRole: UserRole.parent);
+      await _pushNotif(NotificationType.fees, 'تنبيه مصروفات', 'فاتورة ($title) للطالب ${st.name} متبقي ${(total - paid).toStringAsFixed(0)} ج.م.', targetPhone: st.linkedParentPhone.isNotEmpty ? st.linkedParentPhone : null, targetRole: UserRole.parent);
     } else {
-      _persist();
-      notifyListeners();
+      await refreshAll();
     }
   }
 
-  void payInvoice(String id, double amount) {
-    final i = _invoices.indexWhere((x) => x.id == id);
-    if (i != -1) {
-      _invoices[i].paidAmount = (_invoices[i].paidAmount + amount).clamp(0, _invoices[i].totalAmount);
-      _pushNotif(NotificationType.fees, 'تأكيد سداد مصروفات', 'تم سداد ${amount.toStringAsFixed(0)} ج.م لـ (${_invoices[i].title}).');
-    }
+  Future<void> payInvoice(FeeInvoice inv, double amount) async {
+    final newPaid = (inv.paidAmount + amount).clamp(0, inv.totalAmount);
+    await _sb.from('school_invoices').update({'paid_amount': newPaid}).eq('id', inv.id);
+    await _pushNotif(NotificationType.fees, 'تأكيد سداد مصروفات', 'تم سداد ${amount.toStringAsFixed(0)} ج.م لفاتورة (${inv.title}).');
   }
 
-  void addAnnouncement(String title, String body, String cat, UserRole? target, bool urgent) {
-    _announcements.insert(0, AnnouncementNews(id: 'an_${DateTime.now().microsecondsSinceEpoch}', title: title, body: body, category: cat, targetRole: target, author: currentUser?.name ?? 'الإدارة', dateLabel: 'الآن', isUrgent: urgent));
-    _pushNotif(NotificationType.announcement, '$cat: $title', body, targetRole: target);
+  Future<void> addAnnouncement(String title, String body, String cat, UserRole? target, bool urgent) async {
+    await _sb.from('school_announcements').insert({'id': 'an_${DateTime.now().microsecondsSinceEpoch}', 'title': title, 'body': body, 'category': cat, 'target_role': target?.name, 'author': currentUser?.name ?? 'الإدارة', 'date_label': 'الآن', 'is_urgent': urgent});
+    await _pushNotif(NotificationType.announcement, '$cat: $title', body, targetRole: target);
   }
 
-  void sendCustomNotif(NotificationType type, String title, String body, UserRole? target) => _pushNotif(type, title, body, targetRole: target);
+  Future<void> sendCustomNotif(NotificationType type, String title, String body, UserRole? target) => _pushNotif(type, title, body, targetRole: target);
 
-  void _pushNotif(NotificationType type, String title, String body, {String? targetPhone, UserRole? targetRole}) {
-    _notifications.insert(0, SchoolNotification(id: 'n_${DateTime.now().microsecondsSinceEpoch}', type: type, title: title, body: body, targetPhone: targetPhone, targetRole: targetRole, dateLabel: 'الآن'));
-    _persist();
-    notifyListeners();
+  Future<void> _pushNotif(NotificationType type, String title, String body, {String? targetPhone, UserRole? targetRole}) async {
+    await _sb.from('school_notifications').insert({'id': 'n_${DateTime.now().microsecondsSinceEpoch}', 'type': type.name, 'title': title, 'body': body, 'target_phone': targetPhone, 'target_role': targetRole?.name, 'date_label': 'الآن', 'read_by': []});
+    await refreshAll();
   }
 
-  void addFile(String title, String type, GradeLevel grade, String sub, String url) {
-    _files.insert(0, EducationalFile(id: 'f_${DateTime.now().microsecondsSinceEpoch}', title: title, fileType: type, grade: grade, subject: sub, urlOrName: url, uploadedBy: currentUser?.name ?? 'المعلم', dateLabel: 'اليوم'));
-    _persist();
-    notifyListeners();
+  Future<void> addFile(String title, String type, GradeLevel g, String sub, String url) async {
+    await _sb.from('school_files').insert({'id': 'f_${DateTime.now().microsecondsSinceEpoch}', 'title': title, 'file_type': type, 'grade': g.name, 'subject': sub, 'url_or_name': url, 'uploaded_by': currentUser?.name ?? 'المعلم', 'date_label': 'اليوم'});
+    await refreshAll();
   }
 
-  void sendMessage(String recipient, String subject, String body) {
+  Future<void> sendMessage(String rec, String sub, String body) async {
     final u = currentUser;
     if (u == null) return;
-    _messages.insert(0, SchoolMessage(id: 'm_${DateTime.now().microsecondsSinceEpoch}', senderName: u.name, senderPhone: u.phone, recipientLabel: recipient, subject: subject, body: body, dateLabel: 'الآن'));
-    _persist();
-    notifyListeners();
+    await _sb.from('school_messages').insert({'id': 'm_${DateTime.now().microsecondsSinceEpoch}', 'sender_name': u.name, 'sender_phone': u.phone, 'recipient_label': rec, 'subject': sub, 'body': body, 'reply': '', 'date_label': 'الآن'});
+    await refreshAll();
   }
 
-  void replyMessage(String id, String reply) {
-    final i = _messages.indexWhere((m) => m.id == id);
-    if (i != -1) {
-      _messages[i].reply = reply;
-      _persist();
-      notifyListeners();
-    }
+  Future<void> replyMessage(String id, String reply) async {
+    await _sb.from('school_messages').update({'reply': reply}).eq('id', id);
+    await refreshAll();
   }
+}
+
+extension on AppUser {
+  bool linked_parent_phone_match(String parentPhone) => linkedParentPhone.trim() == parentPhone.trim();
 }
 
 class AppScope extends InheritedNotifier<SchoolState> {
@@ -862,7 +838,7 @@ class AppScope extends InheritedNotifier<SchoolState> {
 }
 
 // ============================================================================
-// 3. التطبيق الرئيسي وبوابة التوجيه والتحقق (App, Splash, Auth & OTP)
+// 3. التطبيق وبوابات الدخول والتحقق الحقيقي من السيرفر (Auth & Verification)
 // ============================================================================
 
 class AlRowadPrivateSchoolApp extends StatefulWidget {
@@ -899,25 +875,8 @@ class _AlRowadPrivateSchoolAppState extends State<AlRowadPrivateSchoolApp> {
             debugShowCheckedModeBanner: false,
             title: 'مدرسة الرواد الخاصة',
             themeMode: _state.themeMode,
-            theme: ThemeData(
-              useMaterial3: true,
-              colorScheme: light,
-              scaffoldBackgroundColor: const Color(0xFFF5F7FA),
-              appBarTheme: const AppBarTheme(centerTitle: true, elevation: 0, backgroundColor: Color(0xFF1B365D), foregroundColor: Colors.white),
-              inputDecorationTheme: InputDecorationTheme(
-                filled: true,
-                fillColor: Colors.white,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
-                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
-              ),
-            ),
-            darkTheme: ThemeData(
-              useMaterial3: true,
-              colorScheme: dark,
-              scaffoldBackgroundColor: const Color(0xFF0B1120),
-              appBarTheme: const AppBarTheme(centerTitle: true, elevation: 0, backgroundColor: Color(0xFF111827), foregroundColor: Colors.white),
-              inputDecorationTheme: InputDecorationTheme(filled: true, fillColor: const Color(0xFF1E293B), border: OutlineInputBorder(borderRadius: BorderRadius.circular(14))),
-            ),
+            theme: ThemeData(useMaterial3: true, colorScheme: light, scaffoldBackgroundColor: const Color(0xFFF5F7FA), appBarTheme: const AppBarTheme(centerTitle: true, elevation: 0, backgroundColor: Color(0xFF1B365D), foregroundColor: Colors.white), inputDecorationTheme: InputDecorationTheme(filled: true, fillColor: Colors.white, border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: Color(0xFFE2E8F0))), enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: Color(0xFFE2E8F0))))),
+            darkTheme: ThemeData(useMaterial3: true, colorScheme: dark, scaffoldBackgroundColor: const Color(0xFF0B1120), appBarTheme: const AppBarTheme(centerTitle: true, elevation: 0, backgroundColor: Color(0xFF111827), foregroundColor: Colors.white), inputDecorationTheme: InputDecorationTheme(filled: true, fillColor: const Color(0xFF1E293B), border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)))),
             builder: (_, child) => Directionality(textDirection: TextDirection.rtl, child: child!),
             home: const _AppGate(),
           );
@@ -935,7 +894,7 @@ class _AppGate extends StatelessWidget {
     if (!app.isInitialized) return const _SplashScreen();
     final user = app.currentUser;
     if (user == null) return const LoginScreen();
-    if (!user.isVerified) return const OtpVerificationScreen();
+    if (!user.isVerified) return const EmailVerificationScreen();
     if (!user.isApproved) return const PendingApprovalScreen();
 
     return AnimatedSwitcher(
@@ -960,23 +919,18 @@ class AlRowadLogo extends StatelessWidget {
       height: size,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        gradient: const LinearGradient(colors: [Color(0xFF1B365D), Color(0xFF0D9488)]),
-        border: Border.all(color: const Color(0xFFF59E0B), width: 2.5),
+        color: Colors.white,
+        border: Border.all(color: const Color(0xFFF59E0B), width: 2),
         boxShadow: [BoxShadow(color: const Color(0xFF1B365D).withAlpha(55), blurRadius: 14, offset: const Offset(0, 6))],
       ),
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          Icon(Icons.school_rounded, size: size * 0.5, color: Colors.white),
-          Positioned(
-            bottom: size * 0.13,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-              decoration: BoxDecoration(color: const Color(0xFFF59E0B), borderRadius: BorderRadius.circular(8)),
-              child: Text('الرواد', style: TextStyle(fontSize: size * 0.14, fontWeight: FontWeight.w900, color: const Color(0xFF1B365D))),
-            ),
-          ),
-        ],
+      child: ClipOval(
+        child: Image.asset(
+          'assets/logo.png',
+          width: size,
+          height: size,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => Icon(Icons.school_rounded, size: size * 0.55, color: const Color(0xFF1B365D)),
+        ),
       ),
     );
   }
@@ -993,10 +947,10 @@ class _SplashScreen extends StatelessWidget {
         child: const Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            AlRowadLogo(size: 108),
+            AlRowadLogo(size: 112),
             SizedBox(height: 20),
             Text('مدرسة الرواد الخاصة', style: TextStyle(fontSize: 27, fontWeight: FontWeight.w900, color: Colors.white)),
-            Text('Al Rowad Private School', style: TextStyle(fontSize: 14, color: Color(0xFFFEF08A), fontWeight: FontWeight.w600)),
+            Text('متصل بالسحابة ☁️', style: TextStyle(fontSize: 13.5, color: Color(0xFFFEF08A), fontWeight: FontWeight.w600)),
             SizedBox(height: 30),
             CircularProgressIndicator(valueColor: AlwaysStoppedAnimation(Color(0xFFF59E0B))),
           ],
@@ -1015,9 +969,7 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final _phoneCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
-  bool _obscure = true;
-  bool _remember = true;
-  bool _loading = false;
+  bool _obscure = true, _remember = true, _loading = false;
   String? _error;
 
   @override
@@ -1032,9 +984,8 @@ class _LoginScreenState extends State<LoginScreen> {
       _loading = true;
       _error = null;
     });
-    await Future.delayed(const Duration(milliseconds: 280));
+    final err = await AppScope.of(context).login(_phoneCtrl.text, _passCtrl.text, remember: _remember);
     if (!mounted) return;
-    final err = AppScope.of(context).login(_phoneCtrl.text, _passCtrl.text, rememberSession: _remember);
     setState(() {
       _loading = false;
       _error = err;
@@ -1052,20 +1003,12 @@ class _LoginScreenState extends State<LoginScreen> {
             child: ListView(
               padding: const EdgeInsets.all(22),
               children: [
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: IconButton(
-                    tooltip: 'الوضع الليلي/النهاري',
-                    icon: Icon(app.themeMode == ThemeMode.dark ? Icons.light_mode_rounded : Icons.dark_mode_rounded),
-                    onPressed: app.toggleTheme,
-                  ),
-                ),
-                const Center(child: AlRowadLogo(size: 92)),
+                Align(alignment: Alignment.centerLeft, child: IconButton(icon: Icon(app.themeMode == ThemeMode.dark ? Icons.light_mode : Icons.dark_mode), onPressed: app.toggleTheme)),
+                const Center(child: AlRowadLogo(size: 96)),
                 const SizedBox(height: 16),
                 const Text('مدرسة الرواد الخاصة', textAlign: TextAlign.center, style: TextStyle(fontSize: 25, fontWeight: FontWeight.w900)),
-                const SizedBox(height: 4),
                 Text('Al Rowad Private School', textAlign: TextAlign.center, style: TextStyle(fontSize: 13.5, color: Theme.of(context).hintColor, fontWeight: FontWeight.w600)),
-                const SizedBox(height: 28),
+                const SizedBox(height: 26),
                 Card(
                   elevation: 0,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22), side: BorderSide(color: Colors.grey.withAlpha(45))),
@@ -1074,39 +1017,17 @@ class _LoginScreenState extends State<LoginScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text('تسجيل الدخول', style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold)),
-                        const SizedBox(height: 4),
-                        Text('أدخل رقم الهاتف وكلمة المرور الخاصة بحسابك', style: TextStyle(fontSize: 12.5, color: Theme.of(context).hintColor)),
-                        const SizedBox(height: 18),
-                        TextField(
-                          controller: _phoneCtrl,
-                          keyboardType: TextInputType.phone,
-                          decoration: const InputDecoration(labelText: 'رقم الهاتف', prefixIcon: Icon(Icons.phone_android_rounded)),
-                        ),
+                        const Text('تسجيل الدخول السحابي', style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 16),
+                        TextField(controller: _phoneCtrl, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'رقم الهاتف أو البريد الإلكتروني', prefixIcon: Icon(Icons.phone_android_rounded))),
                         const SizedBox(height: 14),
-                        TextField(
-                          controller: _passCtrl,
-                          obscureText: _obscure,
-                          decoration: InputDecoration(
-                            labelText: 'كلمة المرور',
-                            prefixIcon: const Icon(Icons.lock_outline_rounded),
-                            suffixIcon: IconButton(icon: Icon(_obscure ? Icons.visibility_off_rounded : Icons.visibility_rounded), onPressed: () => setState(() => _obscure = !_obscure)),
-                          ),
-                        ),
+                        TextField(controller: _passCtrl, obscureText: _obscure, decoration: InputDecoration(labelText: 'كلمة المرور', prefixIcon: const Icon(Icons.lock_outline_rounded), suffixIcon: IconButton(icon: Icon(_obscure ? Icons.visibility_off : Icons.visibility), onPressed: () => setState(() => _obscure = !_obscure)))),
                         const SizedBox(height: 8),
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Row(
-                              children: [
-                                Checkbox(value: _remember, onChanged: (v) => setState(() => _remember = v ?? true)),
-                                const Text('تذكرني', style: TextStyle(fontSize: 13)),
-                              ],
-                            ),
-                            TextButton(
-                              onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ForgotPasswordScreen())),
-                              child: const Text('نسيت كلمة المرور؟'),
-                            ),
+                            Row(children: [Checkbox(value: _remember, onChanged: (v) => setState(() => _remember = v ?? true)), const Text('تذكرني', style: TextStyle(fontSize: 13))]),
+                            TextButton(onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ForgotPasswordScreen())), child: const Text('نسيت كلمة المرور؟')),
                           ],
                         ),
                         if (_error != null) ...[
@@ -1121,22 +1042,19 @@ class _LoginScreenState extends State<LoginScreen> {
                             style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1B365D), foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
                             onPressed: _loading ? null : _submit,
                             icon: _loading ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(Icons.login_rounded),
-                            label: Text(_loading ? 'جاري التحقق...' : 'تسجيل الدخول', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                            label: Text(_loading ? 'جاري الاتصال...' : 'تسجيل الدخول', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                           ),
                         ),
                       ],
                     ),
                   ),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 14),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Text('ليس لديك حساب مفعل؟'),
-                    TextButton(
-                      onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RegisterScreen())),
-                      child: const Text('إنشاء حساب طالب / ولي أمر', style: TextStyle(fontWeight: FontWeight.bold)),
-                    ),
+                    const Text('مستخدم جديد؟'),
+                    TextButton(onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RegisterScreen())), child: const Text('تسجيل حساب وتأكيد البريد', style: TextStyle(fontWeight: FontWeight.bold))),
                   ],
                 ),
               ],
@@ -1157,16 +1075,15 @@ class RegisterScreen extends StatefulWidget {
 class _RegisterScreenState extends State<RegisterScreen> {
   UserRole _role = UserRole.student;
   GradeLevel _grade = GradeLevel.p4;
-  final _nameCtrl = TextEditingController();
-  final _phoneCtrl = TextEditingController();
-  final _passCtrl = TextEditingController();
-  final _parentPhoneCtrl = TextEditingController();
+  final _nameCtrl = TextEditingController(), _phoneCtrl = TextEditingController(), _emailCtrl = TextEditingController(), _passCtrl = TextEditingController(), _parentPhoneCtrl = TextEditingController();
+  bool _loading = false;
   String? _err;
 
   @override
   void dispose() {
     _nameCtrl.dispose();
     _phoneCtrl.dispose();
+    _emailCtrl.dispose();
     _passCtrl.dispose();
     _parentPhoneCtrl.dispose();
     super.dispose();
@@ -1179,13 +1096,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
-          const Text('بيانات التسجيل', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 12),
           SegmentedButton<UserRole>(
-            segments: const [
-              ButtonSegment(value: UserRole.student, icon: Icon(Icons.school_rounded), label: Text('طالب')),
-              ButtonSegment(value: UserRole.parent, icon: Icon(Icons.family_restroom_rounded), label: Text('ولي أمر')),
-            ],
+            segments: const [ButtonSegment(value: UserRole.student, icon: Icon(Icons.school), label: Text('طالب')), ButtonSegment(value: UserRole.parent, icon: Icon(Icons.family_restroom), label: Text('ولي أمر'))],
             selected: {_role},
             onSelectionChanged: (s) => setState(() => _role = s.first),
           ),
@@ -1194,31 +1106,40 @@ class _RegisterScreenState extends State<RegisterScreen> {
           const SizedBox(height: 10),
           TextField(controller: _phoneCtrl, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'رقم الهاتف')),
           const SizedBox(height: 10),
+          TextField(controller: _emailCtrl, keyboardType: TextInputType.emailAddress, decoration: const InputDecoration(labelText: 'البريد الإلكتروني الحقيقي (Gmail لتأكيد الحساب)')),
+          const SizedBox(height: 10),
           TextField(controller: _passCtrl, obscureText: true, decoration: const InputDecoration(labelText: 'كلمة المرور (6 أحرف فأكثر)')),
           if (_role == UserRole.student) ...[
             const SizedBox(height: 10),
             DropdownButtonFormField<GradeLevel>(value: _grade, decoration: const InputDecoration(labelText: 'الصف الدراسي'), items: GradeLevel.values.map((g) => DropdownMenuItem(value: g, child: Text(g.label))).toList(), onChanged: (v) { if (v != null) setState(() => _grade = v); }),
             const SizedBox(height: 10),
-            TextField(controller: _parentPhoneCtrl, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'رقم هاتف ولي الأمر (اختياري للربط)')),
+            TextField(controller: _parentPhoneCtrl, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'هاتف ولي الأمر (اختياري للربط)')),
           ],
-          if (_err != null) ...[
-            const SizedBox(height: 10),
-            Text(_err!, style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
-          ],
+          if (_err != null) ...[const SizedBox(height: 10), Text(_err!, style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold))],
           const SizedBox(height: 18),
           SizedBox(
             height: 50,
             child: ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1B365D), foregroundColor: Colors.white),
-              onPressed: () {
-                final res = AppScope.of(context).registerSelf(name: _nameCtrl.text, phone: _phoneCtrl.text, password: _passCtrl.text, role: _role, grade: _grade, linkedParentPhone: _parentPhoneCtrl.text);
-                if (res.error != null) {
-                  setState(() => _err = res.error);
-                } else {
-                  Navigator.pop(context);
-                }
-              },
-              child: const Text('متابعة لتأكيد الحساب'),
+              onPressed: _loading
+                  ? null
+                  : () async {
+                      setState(() {
+                        _loading = true;
+                        _err = null;
+                      });
+                      final err = await AppScope.of(context).registerSelf(name: _nameCtrl.text, phone: _phoneCtrl.text, email: _emailCtrl.text, password: _passCtrl.text, role: _role, grade: _grade, linkedParentPhone: _parentPhoneCtrl.text);
+                      if (!context.mounted) return;
+                      if (err != null) {
+                        setState(() {
+                          _loading = false;
+                          _err = err;
+                        });
+                      } else {
+                        Navigator.pop(context);
+                      }
+                    },
+              child: Text(_loading ? 'جاري إرسال رابط التأكيد...' : 'تسجيل وإرسال تأكيد البريد'),
             ),
           ),
         ],
@@ -1227,80 +1148,71 @@ class _RegisterScreenState extends State<RegisterScreen> {
   }
 }
 
-class OtpVerificationScreen extends StatefulWidget {
-  const OtpVerificationScreen({super.key});
+class EmailVerificationScreen extends StatefulWidget {
+  const EmailVerificationScreen({super.key});
   @override
-  State<OtpVerificationScreen> createState() => _OtpVerificationScreenState();
+  State<EmailVerificationScreen> createState() => _EmailVerificationScreenState();
 }
 
-class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
-  final _otpCtrl = TextEditingController();
-  final _newPassCtrl = TextEditingController();
+class _EmailVerificationScreenState extends State<EmailVerificationScreen> {
+  bool _checking = false;
   String? _err;
-
-  @override
-  void dispose() {
-    _otpCtrl.dispose();
-    _newPassCtrl.dispose();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
     final app = AppScope.of(context);
-    final user = app.currentUser!;
-
+    final u = app.currentUser!;
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('تأكيد وتفعيل الحساب'),
-        actions: [IconButton(icon: const Icon(Icons.logout_rounded), onPressed: app.logout)],
-      ),
+      appBar: AppBar(title: const Text('تأكيد ملكية البريد'), actions: [IconButton(icon: const Icon(Icons.logout_rounded), onPressed: app.logout)]),
       body: ListView(
         padding: const EdgeInsets.all(22),
         children: [
-          const Icon(Icons.verified_user_rounded, size: 72, color: Color(0xFF0D9488)),
+          const Icon(Icons.mark_email_read_rounded, size: 78, color: Color(0xFF0D9488)),
           const SizedBox(height: 14),
-          Text('مرحباً ${user.name}', textAlign: TextAlign.center, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 6),
-          Text('لأمان حسابك، يرجى إدخال رمز التحقق المرسل إلى رقم الهاتف ${user.phone}', textAlign: TextAlign.center, style: TextStyle(color: Theme.of(context).hintColor)),
+          Text('مرحباً ${u.name}', textAlign: TextAlign.center, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          Text('تم إرسال رسالة تأكيد حقيقية من السيرفر إلى بريدك:\n${u.email}', textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.w600)),
           const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(color: const Color(0xFF0D9488).withAlpha(24), borderRadius: BorderRadius.circular(14), border: Border.all(color: const Color(0xFF0D9488).withAlpha(80))),
-            child: Row(
-              children: [
-                const Icon(Icons.sms_rounded, color: Color(0xFF0D9488)),
-                const SizedBox(width: 10),
-                Expanded(child: Text('رسالة التحقق (SMS): رمز تفعيل حسابك في مدرسة الرواد هو [ ${user.otpCode} ]', style: const TextStyle(fontWeight: FontWeight.bold))),
-              ],
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Text(
+                '1. افتح تطبيق Gmail على هاتفك.\n2. افتح الرسالة واضغط على رابط Confirm your mail.\n3. إذا ظهرت صفحة المتصفح بعد الضغط، ارجع هنا واضغط الزر الأخضر بالأسفل.',
+                style: TextStyle(height: 1.6, color: Theme.of(context).hintColor),
+              ),
             ),
           ),
-          const SizedBox(height: 18),
-          TextField(controller: _otpCtrl, keyboardType: TextInputType.number, textAlign: TextAlign.center, decoration: const InputDecoration(labelText: 'أدخل رمز التحقق (4 أرقام)')),
-          const SizedBox(height: 12),
-          TextField(controller: _newPassCtrl, obscureText: true, decoration: const InputDecoration(labelText: 'تعيين كلمة مرور شخصية جديدة (اختياري)')),
-          if (_err != null) ...[
-            const SizedBox(height: 10),
-            Text(_err!, style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
-          ],
+          if (_err != null) ...[const SizedBox(height: 10), Text(_err!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold))],
           const SizedBox(height: 18),
           SizedBox(
-            height: 50,
-            child: ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1B365D), foregroundColor: Colors.white),
-              onPressed: () {
-                final err = app.verifyCurrentUserOtp(_otpCtrl.text, newPassword: _newPassCtrl.text);
-                if (err != null) setState(() => _err = err);
-              },
-              child: const Text('تأكيد وتفعيل الحساب'),
+            height: 52,
+            child: ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF10B981), foregroundColor: Colors.white),
+              onPressed: _checking
+                  ? null
+                  : () async {
+                      setState(() {
+                        _checking = true;
+                        _err = null;
+                      });
+                      final err = await app.confirmEmailVerifiedOnServer();
+                      if (!mounted) return;
+                      setState(() {
+                        _checking = false;
+                        _err = err;
+                      });
+                    },
+              icon: _checking ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(Icons.verified_rounded),
+              label: Text(_checking ? 'جاري التحقق من السيرفر...' : 'تم الضغط على الرابط — تفعيل الدخول ✓'),
             ),
           ),
           TextButton(
-            onPressed: () {
-              final newOtp = app.resendOtpForCurrent();
-              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('تم إرسال رمز جديد: $newOtp')));
+            onPressed: () async {
+              final err = await app.resendVerificationForCurrent();
+              if (!context.mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err ?? 'تم إعادة إرسال رسالة التأكيد لبريدك')));
             },
-            child: const Text('إعادة إرسال الرمز'),
+            child: const Text('إعادة إرسال رسالة التأكيد'),
           ),
         ],
       ),
@@ -1313,9 +1225,8 @@ class PendingApprovalScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final app = AppScope.of(context);
-    final user = app.currentUser!;
     return Scaffold(
-      appBar: AppBar(title: const Text('حالة الحساب'), actions: [IconButton(icon: const Icon(Icons.logout_rounded), onPressed: app.logout)]),
+      appBar: AppBar(title: const Text('اعتماد الإدارة'), actions: [IconButton(icon: const Icon(Icons.refresh), onPressed: app.refreshAll), IconButton(icon: const Icon(Icons.logout_rounded), onPressed: app.logout)]),
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(24),
@@ -1323,12 +1234,12 @@ class PendingApprovalScreen extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               const Icon(Icons.hourglass_top_rounded, size: 78, color: Color(0xFFD97706)),
-              const SizedBox(height: 16),
-              Text('تم تأكيد رقم الهاتف بنجاح (${user.phone})', style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+              const SizedBox(height: 14),
+              const Text('تم تأكيد بريدك بنجاح ✓', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
-              Text('حسابك الآن بانتظار اعتماد إدارة مدرسة الرواد الخاصة لتفعيل جميع الصلاحيات.', textAlign: TextAlign.center, style: TextStyle(color: Theme.of(context).hintColor)),
-              const SizedBox(height: 22),
-              OutlinedButton.icon(onPressed: app.logout, icon: const Icon(Icons.arrow_back), label: const Text('العودة لتسجيل الدخول')),
+              Text('حسابك الآن بانتظار موافقة مدير المدرسة لتفعيل الصلاحيات.', textAlign: TextAlign.center, style: TextStyle(color: Theme.of(context).hintColor)),
+              const SizedBox(height: 18),
+              ElevatedButton.icon(onPressed: app.refreshAll, icon: const Icon(Icons.refresh), label: const Text('تحديث الحالة الآن')),
             ],
           ),
         ),
@@ -1344,81 +1255,67 @@ class ForgotPasswordScreen extends StatefulWidget {
 }
 
 class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
-  final _phoneCtrl = TextEditingController();
-  final _otpCtrl = TextEditingController();
-  final _newPassCtrl = TextEditingController();
-  String? _sentOtp;
+  final _ctrl = TextEditingController();
+  bool _sent = false;
   String? _err;
 
   @override
   void dispose() {
-    _phoneCtrl.dispose();
-    _otpCtrl.dispose();
-    _newPassCtrl.dispose();
+    _ctrl.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final app = AppScope.of(context);
     return Scaffold(
       appBar: AppBar(title: const Text('استعادة كلمة المرور')),
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
-          TextField(controller: _phoneCtrl, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'رقم الهاتف المسجل')),
-          const SizedBox(height: 12),
-          if (_sentOtp == null)
-            ElevatedButton(
-              onPressed: () {
-                final res = app.requestPasswordResetOtp(_phoneCtrl.text);
-                setState(() {
-                  _err = res.error;
-                  _sentOtp = res.otp;
-                });
-              },
-              child: const Text('إرسال رمز التحقق'),
-            )
-          else ...[
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(color: const Color(0xFF0D9488).withAlpha(24), borderRadius: BorderRadius.circular(12)),
-              child: Text('رمز الاستعادة (SMS): $_sentOtp', style: const TextStyle(fontWeight: FontWeight.bold)),
-            ),
-            const SizedBox(height: 12),
-            TextField(controller: _otpCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'رمز التحقق')),
-            const SizedBox(height: 10),
-            TextField(controller: _newPassCtrl, obscureText: true, decoration: const InputDecoration(labelText: 'كلمة المرور الجديدة')),
-            const SizedBox(height: 14),
-            ElevatedButton(
-              onPressed: () {
-                final err = app.completePasswordReset(_phoneCtrl.text, _otpCtrl.text, _newPassCtrl.text);
-                if (err != null) {
-                  setState(() => _err = err);
-                } else {
-                  Navigator.pop(context);
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم تحديث كلمة المرور بنجاح')));
-                }
-              },
-              child: const Text('حفظ كلمة المرور الجديدة'),
-            ),
-          ],
-          if (_err != null) ...[const SizedBox(height: 10), Text(_err!, style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold))],
+          TextField(controller: _ctrl, decoration: const InputDecoration(labelText: 'رقم الهاتف أو البريد المسجل')),
+          const SizedBox(height: 14),
+          ElevatedButton(
+            onPressed: () async {
+              final err = await AppScope.of(context).requestPasswordReset(_ctrl.text);
+              if (!mounted) return;
+              setState(() {
+                _err = err;
+                _sent = err == null;
+              });
+            },
+            child: const Text('إرسال رابط الاستعادة لبريدك'),
+          ),
+          if (_sent) const Padding(padding: EdgeInsets.only(top: 12), child: Text('تم إرسال رابط استعادة كلمة المرور إلى بريدك الإلكتروني بنجاح ✓', style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold))),
+          if (_err != null) Padding(padding: EdgeInsets.only(top: 12), child: Text(_err!, style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold))),
         ],
       ),
     );
   }
-} 
+}
 // ============================================================================
-// 4. مكونات التصميم المشتركة (Clean Design System & Account Tab)
+// 4. مكونات التصميم المشتركة والتحديث السحابي (Cloud UI & Account Tab)
 // ============================================================================
 
 PreferredSizeWidget _buildAppBar(BuildContext context, String title) {
   final app = AppScope.of(context);
   final unread = app.unreadNotificationsCount;
   return AppBar(
-    title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+    title: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Flexible(child: Text(title, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17.5))),
+        if (app.isSyncing) ...[
+          const SizedBox(width: 8),
+          const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
+        ],
+      ],
+    ),
     actions: [
+      IconButton(
+        tooltip: 'تحديث السحابة',
+        icon: const Icon(Icons.sync_rounded),
+        onPressed: app.refreshAll,
+      ),
       IconButton(
         tooltip: 'الإشعارات',
         icon: Badge(isLabelVisible: unread > 0, label: Text('$unread'), child: const Icon(Icons.notifications_none_rounded)),
@@ -1448,7 +1345,7 @@ void _openNotificationsSheet(BuildContext context) {
         children: [
           const SizedBox(height: 10),
           Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey.shade400, borderRadius: BorderRadius.circular(4))),
-          const Padding(padding: EdgeInsets.all(14), child: Text('مركز الإشعارات', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
+          const Padding(padding: EdgeInsets.all(14), child: Text('مركز الإشعارات السحابي', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
           Expanded(
             child: list.isEmpty
                 ? const Center(child: Text('لا توجد إشعارات حالياً'))
@@ -1573,10 +1470,11 @@ class _AccountTab extends StatelessWidget {
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
           ElevatedButton(
-            onPressed: () {
-              final err = AppScope.of(context).changeCurrentUserPassword(oldCtrl.text, newCtrl.text);
+            onPressed: () async {
+              final err = await AppScope.of(context).changeCurrentUserPassword(oldCtrl.text, newCtrl.text);
+              if (!context.mounted) return;
               Navigator.pop(ctx);
-              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err ?? 'تم تغيير كلمة المرور وحفظها بنجاح')));
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err ?? 'تم تحديث كلمة المرور على السحابة بنجاح')));
             },
             child: const Text('حفظ'),
           ),
@@ -1589,61 +1487,67 @@ class _AccountTab extends StatelessWidget {
   Widget build(BuildContext context) {
     final app = AppScope.of(context);
     final u = app.currentUser!;
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        Card(
-          elevation: 0,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: BorderSide(color: Colors.grey.withAlpha(45))),
-          child: Padding(
-            padding: const EdgeInsets.all(18),
+    return RefreshIndicator(
+      onRefresh: app.refreshAll,
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          Card(
+            elevation: 0,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: BorderSide(color: Colors.grey.withAlpha(45))),
+            child: Padding(
+              padding: const EdgeInsets.all(18),
+              child: Column(
+                children: [
+                  CircleAvatar(radius: 34, backgroundColor: u.role.color.withAlpha(30), child: Icon(u.role.icon, size: 34, color: u.role.color)),
+                  const SizedBox(height: 10),
+                  Text(u.name, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(u.role.label, style: TextStyle(color: Theme.of(context).hintColor)),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        decoration: BoxDecoration(color: const Color(0xFF10B981).withAlpha(30), borderRadius: BorderRadius.circular(10)),
+                        child: const Row(children: [Icon(Icons.verified_rounded, size: 14, color: Color(0xFF10B981)), SizedBox(width: 3), Text('موثّق سحابياً', style: TextStyle(fontSize: 11.5, color: Color(0xFF10B981), fontWeight: FontWeight.bold))]),
+                      ),
+                    ],
+                  ),
+                  const Divider(height: 24),
+                  ListTile(dense: true, leading: const Icon(Icons.phone_android), title: const Text('رقم الهاتف'), trailing: Text(u.phone, style: const TextStyle(fontWeight: FontWeight.bold))),
+                  ListTile(dense: true, leading: const Icon(Icons.email_outlined), title: const Text('البريد الإلكتروني'), trailing: Text(u.email, style: const TextStyle(fontSize: 12))),
+                  if (u.role == UserRole.student) ListTile(dense: true, leading: const Icon(Icons.class_), title: const Text('الصف والفصل'), trailing: Text('${u.grade.shortLabel} (${u.classroom})')),
+                  if (u.role == UserRole.teacher) ListTile(dense: true, leading: const Icon(Icons.menu_book), title: const Text('التخصص'), trailing: Text(u.subject)),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Card(
+            elevation: 0,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18), side: BorderSide(color: Colors.grey.withAlpha(45))),
             child: Column(
               children: [
-                CircleAvatar(radius: 34, backgroundColor: u.role.color.withAlpha(30), child: Icon(u.role.icon, size: 34, color: u.role.color)),
-                const SizedBox(height: 10),
-                Text(u.name, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 4),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(u.role.label, style: TextStyle(color: Theme.of(context).hintColor)),
-                    const SizedBox(width: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                      decoration: BoxDecoration(color: const Color(0xFF10B981).withAlpha(30), borderRadius: BorderRadius.circular(10)),
-                      child: const Row(children: [Icon(Icons.verified_rounded, size: 14, color: Color(0xFF10B981)), SizedBox(width: 3), Text('حساب موثّق', style: TextStyle(fontSize: 11.5, color: Color(0xFF10B981), fontWeight: FontWeight.bold))]),
-                    ),
-                  ],
-                ),
-                const Divider(height: 24),
-                ListTile(dense: true, leading: const Icon(Icons.phone_android), title: const Text('رقم الهاتف'), trailing: Text(u.phone, style: const TextStyle(fontWeight: FontWeight.bold))),
-                if (u.role == UserRole.student) ListTile(dense: true, leading: const Icon(Icons.class_), title: const Text('الصف والفصل'), trailing: Text('${u.grade.shortLabel} (${u.classroom})')),
-                if (u.role == UserRole.teacher) ListTile(dense: true, leading: const Icon(Icons.menu_book), title: const Text('التخصص'), trailing: Text(u.subject)),
+                ListTile(leading: const Icon(Icons.lock_reset_rounded), title: const Text('تغيير كلمة المرور'), trailing: const Icon(Icons.chevron_right), onTap: () => _changePasswordDialog(context)),
+                const Divider(height: 1),
+                ListTile(leading: const Icon(Icons.sync_rounded), title: const Text('مزامنة البيانات من السيرفر'), onTap: app.refreshAll),
+                const Divider(height: 1),
+                SwitchListTile(secondary: const Icon(Icons.dark_mode_rounded), title: const Text('الوضع الليلي'), value: app.themeMode == ThemeMode.dark, onChanged: (_) => app.toggleTheme()),
+                const Divider(height: 1),
+                ListTile(leading: const Icon(Icons.logout_rounded, color: Colors.red), title: const Text('تسجيل الخروج', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)), onTap: app.logout),
               ],
             ),
           ),
-        ),
-        const SizedBox(height: 12),
-        Card(
-          elevation: 0,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18), side: BorderSide(color: Colors.grey.withAlpha(45))),
-          child: Column(
-            children: [
-              ListTile(leading: const Icon(Icons.lock_reset_rounded), title: const Text('تغيير كلمة المرور'), trailing: const Icon(Icons.chevron_right), onTap: () => _changePasswordDialog(context)),
-              const Divider(height: 1),
-              SwitchListTile(secondary: const Icon(Icons.dark_mode_rounded), title: const Text('الوضع الليلي'), value: app.themeMode == ThemeMode.dark, onChanged: (_) => app.toggleTheme()),
-              const Divider(height: 1),
-              ListTile(leading: const Icon(Icons.logout_rounded, color: Colors.red), title: const Text('تسجيل الخروج', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)), onTap: app.logout),
-            ],
-          ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
 
 // ============================================================================
-// 5. لوحة إدارة المدرسة (Admin Dashboard + صفحات مستقلة نظيفة)
+// 5. لوحة إدارة المدرسة (Admin Dashboard)
 // ============================================================================
 
 class AdminDashboard extends StatefulWidget {
@@ -1687,40 +1591,47 @@ class _AdminHomeTab extends StatelessWidget {
     final tchCount = app.usersByRole(UserRole.teacher).length;
     final totalFees = app.allInvoices.fold<double>(0, (s, i) => s + i.paidAmount);
 
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        _HeroBanner(title: app.currentUser!.name, subtitle: 'لوحة الإدارة المركزية (حفظ تلقائي)', badge: 'مدرسة الرواد الخاصة', colors: const [Color(0xFF1B365D), Color(0xFF0D9488)]),
-        const SizedBox(height: 14),
-        Row(
-          children: [
-            Expanded(child: _MiniKpi('الطلاب', '$stCount', const Color(0xFF0284C7))),
-            const SizedBox(width: 8),
-            Expanded(child: _MiniKpi('المعلمون', '$tchCount', const Color(0xFF0D9488))),
-            const SizedBox(width: 8),
-            Expanded(child: _MiniKpi('التحصيل', '${totalFees.toStringAsFixed(0)} ج', const Color(0xFFD97706))),
+    return RefreshIndicator(
+      onRefresh: app.refreshAll,
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          _HeroBanner(title: app.currentUser!.name, subtitle: 'قاعدة بيانات سحابية متصلة بجميع الهواتف ☁️', badge: 'مدرسة الرواد الخاصة', colors: const [Color(0xFF1B365D), Color(0xFF0D9488)]),
+          if (app.syncError != null) ...[
+            const SizedBox(height: 10),
+            Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: Colors.red.withAlpha(25), borderRadius: BorderRadius.circular(12)), child: Text(app.syncError!, style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold))),
           ],
-        ),
-        const SizedBox(height: 18),
-        const Text('إدارة النظام والخدمات', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 10),
-        GridView.count(
-          crossAxisCount: 2,
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          crossAxisSpacing: 10,
-          mainAxisSpacing: 10,
-          childAspectRatio: 1.25,
-          children: [
-            _ServiceTile(title: 'الطلاب والمعلمون', subtitle: 'إضافة يدوية وكلمات مرور', icon: Icons.people_alt_rounded, color: const Color(0xFF1B365D), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const _AdminUsersPage()))),
-            _ServiceTile(title: 'استيراد Excel', subtitle: 'رفع xlsx أو csv أو لصق', icon: Icons.table_view_rounded, color: const Color(0xFF0D9488), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const _AdminExcelPage()))),
-            _ServiceTile(title: 'الفصول والمواد', subtitle: 'إدارة الفصول والجداول', icon: Icons.class_rounded, color: const Color(0xFF0284C7), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const _AdminClassesSchedulePage()))),
-            _ServiceTile(title: 'الحضور والدرجات', subtitle: 'متابعة الغياب والامتحانات', icon: Icons.fact_check_rounded, color: const Color(0xFF10B981), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const _AdminAttendanceExamsPage()))),
-            _ServiceTile(title: 'المصروفات', subtitle: 'الفواتير والتحصيل المالي', icon: Icons.payments_rounded, color: const Color(0xFFD97706), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const _AdminFeesPage()))),
-            _ServiceTile(title: 'الإعلانات والرسائل', subtitle: 'نشر أخبار والرد على الآباء', icon: Icons.campaign_rounded, color: const Color(0xFF6D28D9), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const _AdminCommsPage()))),
-          ],
-        ),
-      ],
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(child: _MiniKpi('الطلاب', '$stCount', const Color(0xFF0284C7))),
+              const SizedBox(width: 8),
+              Expanded(child: _MiniKpi('المعلمون', '$tchCount', const Color(0xFF0D9488))),
+              const SizedBox(width: 8),
+              Expanded(child: _MiniKpi('التحصيل', '${totalFees.toStringAsFixed(0)} ج', const Color(0xFFD97706))),
+            ],
+          ),
+          const SizedBox(height: 18),
+          const Text('إدارة النظام والخدمات', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 10),
+          GridView.count(
+            crossAxisCount: 2,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            crossAxisSpacing: 10,
+            mainAxisSpacing: 10,
+            childAspectRatio: 1.25,
+            children: [
+              _ServiceTile(title: 'الطلاب والمعلمون', subtitle: 'إضافة وتأكيد وكلمات مرور', icon: Icons.people_alt_rounded, color: const Color(0xFF1B365D), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const _AdminUsersPage()))),
+              _ServiceTile(title: 'استيراد Excel', subtitle: 'رفع xlsx أو csv أو لصق', icon: Icons.table_view_rounded, color: const Color(0xFF0D9488), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const _AdminExcelPage()))),
+              _ServiceTile(title: 'الفصول والمواد', subtitle: 'إدارة الفصول والجداول', icon: Icons.class_rounded, color: const Color(0xFF0284C7), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const _AdminClassesSchedulePage()))),
+              _ServiceTile(title: 'الحضور والدرجات', subtitle: 'متابعة الغياب والامتحانات', icon: Icons.fact_check_rounded, color: const Color(0xFF10B981), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const _AdminAttendanceExamsPage()))),
+              _ServiceTile(title: 'المصروفات', subtitle: 'الفواتير والتحصيل المالي', icon: Icons.payments_rounded, color: const Color(0xFFD97706), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const _AdminFeesPage()))),
+              _ServiceTile(title: 'الإعلانات والرسائل', subtitle: 'نشر أخبار والرد على الآباء', icon: Icons.campaign_rounded, color: const Color(0xFF6D28D9), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const _AdminCommsPage()))),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1731,27 +1642,30 @@ class _AdminApprovalsTab extends StatelessWidget {
   Widget build(BuildContext context) {
     final app = AppScope.of(context);
     final pending = app.pendingUsers;
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        const Text('حسابات بانتظار الاعتماد أو التأكيد', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 10),
-        if (pending.isEmpty)
-          const Card(child: Padding(padding: EdgeInsets.all(20), child: Center(child: Text('جميع الحسابات مفعّلة ومعتمدة ✓'))))
-        else
-          ...pending.map((u) => Card(
-                child: ListTile(
-                  leading: CircleAvatar(backgroundColor: u.role.color.withAlpha(30), child: Icon(u.role.icon, color: u.role.color)),
-                  title: Text(u.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-                  subtitle: Text('${u.role.label} • ${u.phone}\n${u.isVerified ? "الهاتف مؤكد ✓" : "رمز التحقق: ${u.otpCode}"} • ${u.isApproved ? "معتمد" : "بانتظار اعتماد المدير"}'),
-                  trailing: ElevatedButton(
-                    style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF10B981), foregroundColor: Colors.white),
-                    onPressed: () => app.verifyUserByAdmin(u.id),
-                    child: const Text('اعتماد'),
+    return RefreshIndicator(
+      onRefresh: app.refreshAll,
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          const Text('حسابات بانتظار الاعتماد أو التوثيق', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 10),
+          if (pending.isEmpty)
+            const Card(child: Padding(padding: EdgeInsets.all(20), child: Center(child: Text('جميع الحسابات مفعّلة ومعتمدة ✓'))))
+          else
+            ...pending.map((u) => Card(
+                  child: ListTile(
+                    leading: CircleAvatar(backgroundColor: u.role.color.withAlpha(30), child: Icon(u.role.icon, color: u.role.color)),
+                    title: Text(u.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                    subtitle: Text('${u.role.label} • ${u.phone}\n${u.email}\n${u.isVerified ? "البريد مؤكد ✓" : "بانتظار تأكيد البريد"} • ${u.isApproved ? "معتمد" : "بانتظار اعتمادك"}'),
+                    trailing: ElevatedButton(
+                      style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF10B981), foregroundColor: Colors.white),
+                      onPressed: () => app.approveAndVerifyUser(u.id),
+                      child: const Text('اعتماد'),
+                    ),
                   ),
-                ),
-              )),
-      ],
+                )),
+        ],
+      ),
     );
   }
 }
@@ -1766,7 +1680,7 @@ class _AdminUsersPageState extends State<_AdminUsersPage> {
   UserRole _filter = UserRole.student;
 
   void _openAdd() {
-    final name = TextEditingController(), phone = TextEditingController(), pass = TextEditingController(), extra = TextEditingController();
+    final name = TextEditingController(), phone = TextEditingController(), email = TextEditingController(), pass = TextEditingController(), extra = TextEditingController();
     UserRole role = _filter;
     GradeLevel grade = GradeLevel.p4;
     showModalBottomSheet(
@@ -1779,7 +1693,7 @@ class _AdminUsersPageState extends State<_AdminUsersPage> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text('إضافة حساب جديد', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+                const Text('إضافة حساب سحابي جديد', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 10),
                 DropdownButtonFormField<UserRole>(value: role, items: UserRole.values.map((r) => DropdownMenuItem(value: r, child: Text(r.label))).toList(), onChanged: (v) { if (v != null) setM(() => role = v); }),
                 const SizedBox(height: 8),
@@ -1787,7 +1701,9 @@ class _AdminUsersPageState extends State<_AdminUsersPage> {
                 const SizedBox(height: 8),
                 TextField(controller: phone, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'رقم الهاتف')),
                 const SizedBox(height: 8),
-                TextField(controller: pass, decoration: const InputDecoration(labelText: 'كلمة المرور المبدئية')),
+                TextField(controller: email, keyboardType: TextInputType.emailAddress, decoration: const InputDecoration(labelText: 'البريد الإلكتروني (لتأكيد الحساب)')),
+                const SizedBox(height: 8),
+                TextField(controller: pass, decoration: const InputDecoration(labelText: 'كلمة المرور (6 أحرف فأكثر)')),
                 if (role == UserRole.student || role == UserRole.teacher) ...[
                   const SizedBox(height: 8),
                   DropdownButtonFormField<GradeLevel>(value: grade, items: GradeLevel.values.map((g) => DropdownMenuItem(value: g, child: Text(g.label))).toList(), onChanged: (v) { if (v != null) setM(() => grade = v); }),
@@ -1799,8 +1715,9 @@ class _AdminUsersPageState extends State<_AdminUsersPage> {
                   width: double.infinity,
                   child: ElevatedButton(
                     style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1B365D), foregroundColor: Colors.white),
-                    onPressed: () {
-                      final err = AppScope.of(context).addUserByAdmin(name: name.text, phone: phone.text, password: pass.text, role: role, grade: grade, subject: role == UserRole.teacher ? extra.text : 'عام', linkedParentPhone: role == UserRole.student ? extra.text : '');
+                    onPressed: () async {
+                      final err = await AppScope.of(context).addUserByAdmin(name: name.text, phone: phone.text, email: email.text, password: pass.text, role: role, grade: grade, subject: role == UserRole.teacher ? extra.text : 'عام', linkedParentPhone: role == UserRole.student ? extra.text : '');
+                      if (!context.mounted) return;
                       if (err != null) {
                         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(err)));
                         return;
@@ -1808,7 +1725,7 @@ class _AdminUsersPageState extends State<_AdminUsersPage> {
                       Navigator.pop(ctx);
                       setState(() => _filter = role);
                     },
-                    child: const Text('حفظ الحساب'),
+                    child: const Text('حفظ على السيرفر'),
                   ),
                 ),
               ],
@@ -1845,8 +1762,23 @@ class _AdminUsersPageState extends State<_AdminUsersPage> {
                   child: ListTile(
                     leading: CircleAvatar(backgroundColor: u.role.color.withAlpha(28), child: Icon(u.role.icon, color: u.role.color)),
                     title: Text(u.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-                    subtitle: Text('الهاتف: ${u.phone} • ${u.isVerified ? "موثّق ✓" : "رمز التفعيل: ${u.otpCode}"}'),
-                    trailing: u.phone == '01129220696' ? const Chip(label: Text('المدير')) : IconButton(icon: const Icon(Icons.delete_outline, color: Colors.red), onPressed: () => app.deleteUser(u.id)),
+                    subtitle: Text('${u.phone} • ${u.email}\n${u.isVerified ? "موثّق ✓" : "ينتظر تأكيد البريد"}'),
+                    trailing: u.phone == '01129220696'
+                        ? const Chip(label: Text('المدير'))
+                        : Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                tooltip: 'تغيير كلمة مروره',
+                                icon: const Icon(Icons.key_rounded, color: Color(0xFF0284C7)),
+                                onPressed: () {
+                                  final p = TextEditingController();
+                                  showDialog(context: context, builder: (ctx) => AlertDialog(title: Text('تعيين كلمة مرور جديدة لـ ${u.name}'), content: TextField(controller: p, decoration: const InputDecoration(labelText: 'كلمة المرور الجديدة')), actions: [ElevatedButton(onPressed: () { if (p.text.trim().length >= 6) app.resetUserPasswordByAdmin(u.id, p.text); Navigator.pop(ctx); }, child: const Text('حفظ'))]));
+                                },
+                              ),
+                              IconButton(icon: const Icon(Icons.delete_outline, color: Colors.red), onPressed: () => app.deleteUser(u.id)),
+                            ],
+                          ),
                   ),
                 );
               },
@@ -1866,9 +1798,10 @@ class _AdminExcelPage extends StatefulWidget {
 
 class _AdminExcelPageState extends State<_AdminExcelPage> {
   final _pasteCtrl = TextEditingController();
-  static const _template = 'الاسم,الصفة,رقم الهاتف,كلمة المرور,الصف,هاتف ولي الأمر أو المادة\n'
-      'يوسف أحمد علي,طالب,01055566601,Abc12345,4 ابتدائي,01030303030\n'
-      'أ. رانيا سمير,معلم,01055566602,Teach123,5 ابتدائي,العلوم';
+  bool _busy = false;
+  static const _template = 'الاسم,الصفة,الهاتف,البريد,كلمة المرور,الصف,هاتف ولي الأمر أو المادة\n'
+      'يوسف أحمد علي,طالب,01055566601,youssef@gmail.com,Abc12345,4 ابتدائي,01030303030\n'
+      'أ. رانيا سمير,معلم,01055566602,rania@gmail.com,Teach123,5 ابتدائي,العلوم';
 
   @override
   void dispose() {
@@ -1879,44 +1812,55 @@ class _AdminExcelPageState extends State<_AdminExcelPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('استيراد من Excel')),
+      appBar: AppBar(title: const Text('استيراد Excel السحابي')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          const Text('ترتيب الأعمدة: الاسم | الصفة (طالب/معلم/ولي أمر) | الهاتف | كلمة المرور | الصف | هاتف ولي الأمر أو المادة', style: TextStyle(fontWeight: FontWeight.bold)),
+          const Text('ترتيب الأعمدة (7 أعمدة): الاسم | الصفة | الهاتف | البريد الإلكتروني | كلمة المرور | الصف | هاتف ولي الأمر أو المادة', style: TextStyle(fontWeight: FontWeight.bold)),
           const SizedBox(height: 14),
           ElevatedButton.icon(
             style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0D9488), foregroundColor: Colors.white, minimumSize: const Size.fromHeight(48)),
-            onPressed: () async {
-              try {
-                final picked = await FilePicker.pickFile(type: FileType.custom, allowedExtensions: ['xlsx', 'csv']);
-                if (picked == null) return;
-                final bytes = await picked.readAsBytes();
-                if (!context.mounted) return;
-                final res = AppScope.of(context).importExcelOrCsvBytes(bytes, picked.name);
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${res.message}: أضيف ${res.added} (تخطي ${res.skipped})')));
-              } catch (_) {
-                if (!context.mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('استخدم اللصق المباشر بالأسفل')));
-              }
-            },
+            onPressed: _busy
+                ? null
+                : () async {
+                    try {
+                      final picked = await FilePicker.pickFile(type: FileType.custom, allowedExtensions: ['xlsx', 'csv']);
+                      if (picked == null) return;
+                      setState(() => _busy = true);
+                      final bytes = await picked.readAsBytes();
+                      if (!context.mounted) return;
+                      final res = await AppScope.of(context).importExcelOrCsvBytes(bytes, picked.name);
+                      if (!context.mounted) return;
+                      setState(() => _busy = false);
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${res.message}: أضيف ${res.added} (تخطي ${res.skipped})')));
+                    } catch (_) {
+                      if (!context.mounted) return;
+                      setState(() => _busy = false);
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('استخدم اللصق المباشر بالأسفل')));
+                    }
+                  },
             icon: const Icon(Icons.upload_file_rounded),
             label: const Text('اختيار ملف .xlsx أو .csv من الهاتف'),
           ),
           const SizedBox(height: 10),
-          OutlinedButton.icon(onPressed: () => setState(() => _pasteCtrl.text = _template), icon: const Icon(Icons.description_outlined), label: const Text('تعبئة نموذج جدول تجريبي')),
+          OutlinedButton.icon(onPressed: () => setState(() => _pasteCtrl.text = _template), icon: const Icon(Icons.description_outlined), label: const Text('تعبئة نموذج جدول Excel')),
           const SizedBox(height: 10),
           TextField(controller: _pasteCtrl, maxLines: 6, decoration: const InputDecoration(labelText: 'أو الصق صفوف الجدول هنا')),
           const SizedBox(height: 14),
           ElevatedButton.icon(
             style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1B365D), foregroundColor: Colors.white, minimumSize: const Size.fromHeight(48)),
-            onPressed: () {
-              if (_pasteCtrl.text.trim().isEmpty) return;
-              final res = AppScope.of(context).importDelimitedText(_pasteCtrl.text);
-              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${res.message}: تم استيراد ${res.added} حساب (تخطي ${res.skipped})')));
-            },
-            icon: const Icon(Icons.playlist_add_check_rounded),
-            label: const Text('تنفيذ الاستيراد والحفظ'),
+            onPressed: _busy
+                ? null
+                : () async {
+                    if (_pasteCtrl.text.trim().isEmpty) return;
+                    setState(() => _busy = true);
+                    final res = await AppScope.of(context).importDelimitedText(_pasteCtrl.text);
+                    if (!context.mounted) return;
+                    setState(() => _busy = false);
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('${res.message}: تم رفع ${res.added} حساب (تخطي ${res.skipped})')));
+                  },
+            icon: const Icon(Icons.cloud_upload_rounded),
+            label: Text(_busy ? 'جاري الرفع للسحابة...' : 'تنفيذ الاستيراد والرفع'),
           ),
         ],
       ),
@@ -2060,8 +2004,7 @@ class _AdminFeesPage extends StatelessWidget {
             return;
           }
           AppUser st = students.first;
-          final title = TextEditingController(text: 'قسط دراسي');
-          final total = TextEditingController(text: '8000');
+          final title = TextEditingController(text: 'قسط دراسي'), total = TextEditingController(text: '8000');
           showDialog(
             context: context,
             builder: (ctx) => StatefulBuilder(
@@ -2090,7 +2033,7 @@ class _AdminFeesPage extends StatelessWidget {
         itemCount: app.allInvoices.length,
         itemBuilder: (_, i) {
           final inv = app.allInvoices[i];
-          return Card(child: ListTile(title: Text('${inv.studentName} • ${inv.title}'), subtitle: Text('المتبقي: ${inv.remaining.toStringAsFixed(0)} من ${inv.totalAmount.toStringAsFixed(0)} ج.م'), trailing: inv.isFullyPaid ? const Chip(label: Text('مسدد')) : ElevatedButton(onPressed: () => app.payInvoice(inv.id, inv.remaining), child: const Text('تحصيل'))));
+          return Card(child: ListTile(title: Text('${inv.studentName} • ${inv.title}'), subtitle: Text('المتبقي: ${inv.remaining.toStringAsFixed(0)} من ${inv.totalAmount.toStringAsFixed(0)} ج.م'), trailing: inv.isFullyPaid ? const Chip(label: Text('مسدد')) : ElevatedButton(onPressed: () => app.payInvoice(inv, inv.remaining), child: const Text('تحصيل'))));
         },
       ),
     );
@@ -2143,28 +2086,31 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
     final app = AppScope.of(context);
     final t = app.currentUser!;
     final pages = [
-      ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          _HeroBanner(title: t.name, subtitle: 'معلم مادة ${t.subject} (${t.grade.shortLabel})', badge: 'بوابة المعلم', colors: const [Color(0xFF0D9488), Color(0xFF1B365D)]),
-          const SizedBox(height: 16),
-          GridView.count(
-            crossAxisCount: 2,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            crossAxisSpacing: 10,
-            mainAxisSpacing: 10,
-            childAspectRatio: 1.25,
-            children: [
-              _ServiceTile(title: 'الطلاب والحضور', subtitle: 'تحضير بضغطة زر', icon: Icons.fact_check_rounded, color: const Color(0xFF0D9488), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const _TeacherAttendancePage()))),
-              _ServiceTile(title: 'الواجبات', subtitle: 'إضافة مهام للطلاب', icon: Icons.assignment_rounded, color: const Color(0xFF0284C7), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const _TeacherHomeworkPage()))),
-              _ServiceTile(title: 'رصد الدرجات', subtitle: 'إدخال وتحديث النتائج', icon: Icons.grade_rounded, color: const Color(0xFF10B981), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const _TeacherGradesPage()))),
-              _ServiceTile(title: 'الملفات والفصول', subtitle: 'رفع PDF ومذكرات', icon: Icons.upload_file_rounded, color: const Color(0xFF6D28D9), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const _TeacherFilesPage()))),
-            ],
-          ),
-        ],
+      RefreshIndicator(
+        onRefresh: app.refreshAll,
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            _HeroBanner(title: t.name, subtitle: 'معلم مادة ${t.subject} (${t.grade.shortLabel})', badge: 'بوابة المعلم', colors: const [Color(0xFF0D9488), Color(0xFF1B365D)]),
+            const SizedBox(height: 16),
+            GridView.count(
+              crossAxisCount: 2,
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              crossAxisSpacing: 10,
+              mainAxisSpacing: 10,
+              childAspectRatio: 1.25,
+              children: [
+                _ServiceTile(title: 'الطلاب والحضور', subtitle: 'تحضير بضغطة زر', icon: Icons.fact_check_rounded, color: const Color(0xFF0D9488), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const _TeacherAttendancePage()))),
+                _ServiceTile(title: 'الواجبات', subtitle: 'إضافة مهام للطلاب', icon: Icons.assignment_rounded, color: const Color(0xFF0284C7), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const _TeacherHomeworkPage()))),
+                _ServiceTile(title: 'رصد الدرجات', subtitle: 'إدخال وتحديث النتائج', icon: Icons.grade_rounded, color: const Color(0xFF10B981), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const _TeacherGradesPage()))),
+                _ServiceTile(title: 'الملفات والفصول', subtitle: 'رفع PDF ومذكرات', icon: Icons.upload_file_rounded, color: const Color(0xFF6D28D9), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const _TeacherFilesPage()))),
+              ],
+            ),
+          ],
+        ),
       ),
-      _SchoolFeedTab(user: t),
+      const _SchoolFeedTab(),
       const _AccountTab(),
     ];
 
@@ -2257,8 +2203,7 @@ class _TeacherHomeworkPage extends StatelessWidget {
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () {
           GradeLevel g = app.currentUser!.grade;
-          final sub = TextEditingController(text: app.currentUser!.subject);
-          final title = TextEditingController(), det = TextEditingController();
+          final sub = TextEditingController(text: app.currentUser!.subject), title = TextEditingController(), det = TextEditingController();
           showDialog(
             context: context,
             builder: (ctx) => StatefulBuilder(
@@ -2308,8 +2253,7 @@ class _TeacherGradesPage extends StatelessWidget {
         onPressed: () {
           if (students.isEmpty) return;
           AppUser st = students.first;
-          final sub = TextEditingController(text: app.currentUser!.subject);
-          final sc = TextEditingController(text: '28'), mx = TextEditingController(text: '30');
+          final sub = TextEditingController(text: app.currentUser!.subject), sc = TextEditingController(text: '28'), mx = TextEditingController(text: '30');
           showDialog(
             context: context,
             builder: (ctx) => StatefulBuilder(
@@ -2375,7 +2319,7 @@ class _TeacherFilesPage extends StatelessWidget {
 }
 
 // ============================================================================
-// 7. بوابة الطالب (Student Dashboard)
+// 7. بوابة الطالب وولي الأمر (Student & Parent Dashboards)
 // ============================================================================
 
 class StudentDashboard extends StatefulWidget {
@@ -2389,30 +2333,34 @@ class _StudentDashboardState extends State<StudentDashboard> {
 
   @override
   Widget build(BuildContext context) {
-    final st = AppScope.of(context).currentUser!;
+    final app = AppScope.of(context);
+    final st = app.currentUser!;
     final pages = [
-      ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          _HeroBanner(title: st.name, subtitle: '${st.grade.label} • ${st.classroom}', badge: 'حساب الطالب الموثّق', colors: const [Color(0xFF0284C7), Color(0xFF1B365D)]),
-          const SizedBox(height: 16),
-          GridView.count(
-            crossAxisCount: 2,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            crossAxisSpacing: 10,
-            mainAxisSpacing: 10,
-            childAspectRatio: 1.25,
-            children: [
-              _ServiceTile(title: 'الجدول والامتحانات', subtitle: 'حصص الأسبوع واللجان', icon: Icons.calendar_month_rounded, color: const Color(0xFF0284C7), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => _StudentScheduleExamsPage(grade: st.grade)))),
-              _ServiceTile(title: 'الواجبات والملفات', subtitle: 'المهام ومذكرات PDF', icon: Icons.assignment_rounded, color: const Color(0xFF0D9488), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => _StudentHwFilesPage(student: st)))),
-              _ServiceTile(title: 'الدرجات والنتائج', subtitle: 'كشف الدرجات والمعدل', icon: Icons.grade_rounded, color: const Color(0xFF10B981), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => _StudentResultsPage(student: st)))),
-              _ServiceTile(title: 'الحضور والغياب', subtitle: 'سجل الحضور اليومي', icon: Icons.fact_check_rounded, color: const Color(0xFF6D28D9), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => _StudentAttendancePage(student: st)))),
-            ],
-          ),
-        ],
+      RefreshIndicator(
+        onRefresh: app.refreshAll,
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            _HeroBanner(title: st.name, subtitle: '${st.grade.label} • ${st.classroom}', badge: 'حساب الطالب الموثّق', colors: const [Color(0xFF0284C7), Color(0xFF1B365D)]),
+            const SizedBox(height: 16),
+            GridView.count(
+              crossAxisCount: 2,
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              crossAxisSpacing: 10,
+              mainAxisSpacing: 10,
+              childAspectRatio: 1.25,
+              children: [
+                _ServiceTile(title: 'الجدول والامتحانات', subtitle: 'حصص الأسبوع واللجان', icon: Icons.calendar_month_rounded, color: const Color(0xFF0284C7), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => _StudentScheduleExamsPage(grade: st.grade)))),
+                _ServiceTile(title: 'الواجبات والملفات', subtitle: 'المهام ومذكرات PDF', icon: Icons.assignment_rounded, color: const Color(0xFF0D9488), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => _StudentHwFilesPage(student: st)))),
+                _ServiceTile(title: 'الدرجات والنتائج', subtitle: 'كشف الدرجات والمعدل', icon: Icons.grade_rounded, color: const Color(0xFF10B981), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => _StudentResultsPage(student: st)))),
+                _ServiceTile(title: 'الحضور والغياب', subtitle: 'سجل الحضور اليومي', icon: Icons.fact_check_rounded, color: const Color(0xFF6D28D9), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => _StudentAttendancePage(student: st)))),
+              ],
+            ),
+          ],
+        ),
       ),
-      _SchoolFeedTab(user: st),
+      const _SchoolFeedTab(),
       const _AccountTab(),
     ];
 
@@ -2472,8 +2420,8 @@ class _StudentHwFilesPage extends StatelessWidget {
         children: [
           const Text('الواجبات المطلوبة', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
           ...hws.map((h) {
-            final done = h.completedStudentIds.contains(student.id);
-            return Card(child: CheckboxListTile(value: done, onChanged: (_) => app.toggleHomeworkCompletion(h.id, student.id), title: Text('${h.subject}: ${h.title}'), subtitle: Text('${h.details} • التسليم: ${h.dueDate}')));
+            final done = h.completedIds.contains(student.id);
+            return Card(child: CheckboxListTile(value: done, onChanged: (_) => app.toggleHomeworkCompletion(h, student.id), title: Text('${h.subject}: ${h.title}'), subtitle: Text('${h.details} • التسليم: ${h.dueDate}')));
           }),
           const SizedBox(height: 14),
           const Text('الملفات التعليمية', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
@@ -2516,17 +2464,11 @@ class _StudentAttendancePage extends StatelessWidget {
       appBar: AppBar(title: const Text('سجل الحضور والغياب')),
       body: ListView(
         padding: const EdgeInsets.all(14),
-        children: [
-          Card(child: ListTile(leading: Icon(status.icon, color: status.color, size: 32), title: Text('حالة الحضور: ${student.name}'), trailing: Text(status.label, style: TextStyle(color: status.color, fontWeight: FontWeight.bold)))),
-        ],
+        children: [Card(child: ListTile(leading: Icon(status.icon, color: status.color, size: 32), title: Text('حالة الحضور: ${student.name}'), trailing: Text(status.label, style: TextStyle(color: status.color, fontWeight: FontWeight.bold))))],
       ),
     );
   }
 }
-
-// ============================================================================
-// 8. بوابة ولي الأمر (Parent Dashboard)
-// ============================================================================
 
 class ParentDashboard extends StatefulWidget {
   const ParentDashboard({super.key});
@@ -2545,34 +2487,37 @@ class _ParentDashboardState extends State<ParentDashboard> {
     final active = app.selectedParentChild;
 
     final pages = [
-      ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          _HeroBanner(title: p.name, subtitle: 'متابعة الأبناء والمصروفات والتواصل المباشر', badge: 'بوابة ولي الأمر', colors: const [Color(0xFF6D28D9), Color(0xFF1B365D)]),
-          const SizedBox(height: 12),
-          if (kids.isNotEmpty) ...[
-            const Text('اختر الابن:', style: TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 6),
-            Wrap(spacing: 8, children: kids.map((k) => ChoiceChip(label: Text('${k.name} (${k.grade.shortLabel})'), selected: k.id == active?.id, onSelected: (_) => app.selectParentChild(k.id))).toList()),
-            const SizedBox(height: 14),
-          ],
-          GridView.count(
-            crossAxisCount: 2,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            crossAxisSpacing: 10,
-            mainAxisSpacing: 10,
-            childAspectRatio: 1.25,
-            children: [
-              _ServiceTile(title: 'النتائج والحضور', subtitle: 'متابعة مستوى الابن', icon: Icons.grade_rounded, color: const Color(0xFF10B981), onTap: () { if (active != null) Navigator.push(context, MaterialPageRoute(builder: (_) => _StudentResultsPage(student: active))); }),
-              _ServiceTile(title: 'الواجبات والجدول', subtitle: 'مهام الابن اليومية', icon: Icons.assignment_rounded, color: const Color(0xFF0284C7), onTap: () { if (active != null) Navigator.push(context, MaterialPageRoute(builder: (_) => _StudentHwFilesPage(student: active))); }),
-              _ServiceTile(title: 'المصروفات', subtitle: 'الفواتير والسداد', icon: Icons.payments_rounded, color: const Color(0xFFD97706), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => _ParentFeesPage(kids: kids)))),
-              _ServiceTile(title: 'تواصل مع المدرسة', subtitle: 'إرسال استفسار أو شكوى', icon: Icons.chat_rounded, color: const Color(0xFF6D28D9), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const _ParentMessagesPage()))),
+      RefreshIndicator(
+        onRefresh: app.refreshAll,
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            _HeroBanner(title: p.name, subtitle: 'متابعة الأبناء والمصروفات والتواصل السحابي', badge: 'بوابة ولي الأمر', colors: const [Color(0xFF6D28D9), Color(0xFF1B365D)]),
+            const SizedBox(height: 12),
+            if (kids.isNotEmpty) ...[
+              const Text('اختر الابن:', style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 6),
+              Wrap(spacing: 8, children: kids.map((k) => ChoiceChip(label: Text('${k.name} (${k.grade.shortLabel})'), selected: k.id == active?.id, onSelected: (_) => app.selectParentChild(k.id))).toList()),
+              const SizedBox(height: 14),
             ],
-          ),
-        ],
+            GridView.count(
+              crossAxisCount: 2,
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              crossAxisSpacing: 10,
+              mainAxisSpacing: 10,
+              childAspectRatio: 1.25,
+              children: [
+                _ServiceTile(title: 'النتائج والدرجات', subtitle: 'متابعة مستوى الابن', icon: Icons.grade_rounded, color: const Color(0xFF10B981), onTap: () { if (active != null) Navigator.push(context, MaterialPageRoute(builder: (_) => _StudentResultsPage(student: active))); }),
+                _ServiceTile(title: 'الواجبات والملفات', subtitle: 'مهام الابن اليومية', icon: Icons.assignment_rounded, color: const Color(0xFF0284C7), onTap: () { if (active != null) Navigator.push(context, MaterialPageRoute(builder: (_) => _StudentHwFilesPage(student: active))); }),
+                _ServiceTile(title: 'المصروفات', subtitle: 'الفواتير والسداد', icon: Icons.payments_rounded, color: const Color(0xFFD97706), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => _ParentFeesPage(kids: kids)))),
+                _ServiceTile(title: 'تواصل مع المدرسة', subtitle: 'إرسال استفسار أو شكوى', icon: Icons.chat_rounded, color: const Color(0xFF6D28D9), onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const _ParentMessagesPage()))),
+              ],
+            ),
+          ],
+        ),
       ),
-      _SchoolFeedTab(user: p),
+      const _SchoolFeedTab(),
       const _AccountTab(),
     ];
 
@@ -2609,7 +2554,7 @@ class _ParentFeesPage extends StatelessWidget {
               itemCount: invoices.length,
               itemBuilder: (_, i) {
                 final inv = invoices[i];
-                return Card(child: ListTile(title: Text('${inv.studentName} - ${inv.title}'), subtitle: Text('المتبقي: ${inv.remaining.toStringAsFixed(0)} من ${inv.totalAmount.toStringAsFixed(0)} ج.م'), trailing: inv.isFullyPaid ? const Chip(label: Text('مسدد')) : ElevatedButton(onPressed: () => app.payInvoice(inv.id, inv.remaining), child: const Text('سداد'))));
+                return Card(child: ListTile(title: Text('${inv.studentName} - ${inv.title}'), subtitle: Text('المتبقي: ${inv.remaining.toStringAsFixed(0)} من ${inv.totalAmount.toStringAsFixed(0)} ج.م'), trailing: inv.isFullyPaid ? const Chip(label: Text('مسدد')) : ElevatedButton(onPressed: () => app.payInvoice(inv, inv.remaining), child: const Text('سداد'))));
               },
             ),
     );
@@ -2644,18 +2589,20 @@ class _ParentMessagesPage extends StatelessWidget {
 }
 
 class _SchoolFeedTab extends StatelessWidget {
-  final AppUser user;
-  const _SchoolFeedTab({required this.user});
+  const _SchoolFeedTab();
   @override
   Widget build(BuildContext context) {
     final app = AppScope.of(context);
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        const Text('إعلانات وأخبار المدرسة', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 8),
-        ...app.allAnnouncements.map((a) => Card(child: ListTile(leading: const Icon(Icons.campaign_rounded, color: Color(0xFF1B365D)), title: Text(a.title, style: const TextStyle(fontWeight: FontWeight.bold)), subtitle: Text('${a.body}\n${a.dateLabel}')))),
-      ],
+    return RefreshIndicator(
+      onRefresh: app.refreshAll,
+      child: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          const Text('إعلانات وأخبار المدرسة', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          ...app.allAnnouncements.map((a) => Card(child: ListTile(leading: const Icon(Icons.campaign_rounded, color: Color(0xFF1B365D)), title: Text(a.title, style: const TextStyle(fontWeight: FontWeight.bold)), subtitle: Text('${a.body}\n${a.dateLabel}')))),
+        ],
+      ),
     );
   }
 }
