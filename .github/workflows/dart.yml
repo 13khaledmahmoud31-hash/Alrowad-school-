@@ -24,12 +24,35 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: Setup Android Project if Missing
+      - name: Setup Android Project, Internet & Icon
         run: |
           if [ ! -d "android" ]; then
             flutter create --platforms=android --org com.alrowad.school --project-name alrowad_private_school /tmp/scaffold
             cp -r /tmp/scaffold/android ./android
             sed -i 's/android:label="[^"]*"/android:label="مدرسة الرواد الخاصة"/' android/app/src/main/AndroidManifest.xml
+          fi
+          grep -q "android.permission.INTERNET" android/app/src/main/AndroidManifest.xml || sed -i 's|<application|<uses-permission android:name="android.permission.INTERNET"/>\n    <application|' android/app/src/main/AndroidManifest.xml
+          IMG=$(find . -maxdepth 2 -not -path './android/*' -not -path './build/*' -not -path './.git/*' -type f \( -iname "*.png" -o -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.webp" \) | head -n 1)
+          if [ -n "$IMG" ]; then
+            mkdir -p assets
+            python3 -c "import PIL" 2>/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq python3-pil)
+            python3 - "$IMG" << 'PY'
+          import os, sys
+          from PIL import Image
+
+          img = Image.open(sys.argv[1]).convert("RGBA")
+          w, h = img.size
+          side = min(w, h)
+          img = img.crop(((w - side) // 2, (h - side) // 2, (w + side) // 2, (h + side) // 2))
+          img.resize((512, 512), Image.Resampling.LANCZOS).save("assets/logo.png", "PNG")
+
+          sizes = {"mipmap-mdpi": 48, "mipmap-hdpi": 72, "mipmap-xhdpi": 96, "mipmap-xxhdpi": 144, "mipmap-xxxhdpi": 192}
+          for folder, sz in sizes.items():
+              out = f"android/app/src/main/res/{folder}"
+              os.makedirs(out, exist_ok=True)
+              img.resize((sz, sz), Image.Resampling.LANCZOS).save(f"{out}/ic_launcher.png", "PNG")
+          PY
+            rm -rf android/app/src/main/res/mipmap-anydpi-v26
           fi
 
       - name: Install Dependencies
